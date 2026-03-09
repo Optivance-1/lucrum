@@ -20,9 +20,10 @@ function Skeleton({ className = '' }: { className?: string }) {
 }
 
 export default function AIInsightsPage() {
-  const { metrics, insights, loading, insightsLoading, error, lastRefreshed, refresh } = useStripeData()
+  const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'anthropic' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
 
   const askAI = useCallback(async (question: string) => {
@@ -51,9 +52,11 @@ export default function AIInsightsPage() {
         }),
       })
       const data = await res.json()
+      setAiProvider(data.provider ?? 'fallback')
       setAiResponse(data.answer ?? 'Could not get a response.')
     } catch {
-      setAiResponse('Connection to AI CFO failed. Check your ANTHROPIC_API_KEY.')
+      setAiProvider('fallback')
+      setAiResponse('AI advisor is temporarily in local fallback mode. Try again in a moment.')
     } finally {
       setAiLoading(false)
     }
@@ -72,6 +75,7 @@ export default function AIInsightsPage() {
       title="Lucrum AI Advisor"
       subtitle="Plain-English financial summary and ranked recommendations"
       error={error}
+      isDemoData={isDemoData}
       lastRefreshed={lastRefreshed}
       loading={loading}
       onRefresh={refresh}
@@ -117,7 +121,7 @@ export default function AIInsightsPage() {
               )
             })
           ) : (
-            <p className="text-slate-aug text-sm py-4">Connect your Anthropic API key to enable AI insights.</p>
+            <p className="text-slate-aug text-sm py-4">AI insights are warming up. Refresh to regenerate suggestions.</p>
           )}
         </div>
       </div>
@@ -151,6 +155,11 @@ export default function AIInsightsPage() {
         {aiResponse && (
           <div className="mt-3 p-4 rounded-xl bg-gold/5 border border-gold/20">
             <p className="text-sm text-white leading-relaxed">{aiResponse}</p>
+            {aiProvider && (
+              <p className="text-[11px] font-mono uppercase tracking-widest text-slate-aug mt-2">
+                Source: {aiProvider}
+              </p>
+            )}
           </div>
         )}
 

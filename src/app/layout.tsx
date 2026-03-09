@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { ClerkProvider } from '@clerk/nextjs'
 import { Playfair_Display, DM_Sans, DM_Mono } from 'next/font/google'
 import './globals.css'
 
@@ -37,7 +38,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${playfair.variable} ${dmSans.variable} ${dmMono.variable}`}>
       <body className="bg-obsidian text-white font-body antialiased">
-        {children}
+        <ClerkProvider>
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   )

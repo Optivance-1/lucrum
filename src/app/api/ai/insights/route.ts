@@ -1,11 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { CFOContext, AIInsight } from '@/types'
-import { generateAIText } from '@/lib/ai'
+import { callHeavyAI } from '@/lib/ai-client'
+
+function toMetric(label: string, value: string): string {
+  return `${value} ${label}`.trim()
+}
+
+function buildFallbackInsights(context: CFOContext): AIInsight[] {
+  const runwayCritical = context.runway < 60
+  const churnWarning = context.churnRate > 5
+  const growthPositive = context.mrrGrowth > 0
+
+  const insights: AIInsight[] = [
+    {
+      id: 'fallback_cash',
+      type: runwayCritical ? 'critical' : 'opportunity',
+      title: runwayCritical ? 'Runway is tight' : 'Runway is stable',
+      body: runwayCritical
+        ? `You have ${context.runway} days of runway. Cut one non-core expense this week to buy decision time.`
+        : `You have ${context.runway} days of runway. Protect this by avoiding fixed-cost increases without clear payback.`,
+      action: runwayCritical ? 'Cut spend' : 'Protect runway',
+      metric: toMetric('days', String(context.runway)),
+      priority: 1,
+    },
+    {
+      id: 'fallback_churn',
+      type: churnWarning ? 'warning' : 'win',
+      title: churnWarning ? 'Retention leak detected' : 'Retention holding',
+      body: churnWarning
+        ? `Churn is ${context.churnRate}%. Focus on failed-payment recovery and targeted save offers before buying more traffic.`
+        : `Churn is ${context.churnRate}%, which is manageable. Keep onboarding tight and monitor cancellation reasons weekly.`,
+      action: 'Review churn',
+      metric: toMetric('churn', `${context.churnRate}%`),
+      priority: 2,
+    },
+    {
+      id: 'fallback_growth',
+      type: growthPositive ? 'win' : 'warning',
+      title: growthPositive ? 'MRR trend is up' : 'Growth is soft',
+      body: growthPositive
+        ? `MRR grew ${context.mrrGrowth}% MoM. Double down on the acquisition channel driving the highest retained subscribers.`
+        : `MRR is ${context.mrrGrowth}% MoM. Run one pricing or packaging test before increasing paid spend.`,
+      action: growthPositive ? 'Scale channel' : 'Test pricing',
+      metric: toMetric('MoM', `${context.mrrGrowth}%`),
+      priority: 3,
+    },
+    {
+      id: 'fallback_opportunity',
+      type: 'opportunity',
+      title: 'Next best action',
+      body: `With $${context.revenue30d} in 30-day revenue and ${context.newCustomers30d} new customers, ship one retention experiment and one pricing experiment this month.`,
+      action: 'Run experiments',
+      metric: toMetric('new', `${context.newCustomers30d} customers`),
+      priority: 3,
+    },
+  ]
+
+  return insights
+}
 
 export async function POST(req: NextRequest) {
-  try {
-    const context: CFOContext = await req.json()
+  const contextRaw: Partial<CFOContext> = await req.json().catch(() => ({}))
+  const context: CFOContext = {
+    mrr: Number(contextRaw.mrr ?? 0),
+    mrrGrowth: Number(contextRaw.mrrGrowth ?? 0),
+    revenue30d: Number(contextRaw.revenue30d ?? 0),
+    revenueGrowth: Number(contextRaw.revenueGrowth ?? 0),
+    activeSubscriptions: Number(contextRaw.activeSubscriptions ?? 0),
+    newSubscriptions30d: Number(contextRaw.newSubscriptions30d ?? 0),
+    churnRate: Number(contextRaw.churnRate ?? 0),
+    newCustomers30d: Number(contextRaw.newCustomers30d ?? 0),
+    availableBalance: Number(contextRaw.availableBalance ?? 0),
+    runway: Number(contextRaw.runway ?? 0),
+    cancelledSubscriptions30d: Number(contextRaw.cancelledSubscriptions30d ?? 0),
+  }
 
+  try {
     const prompt = `You are Lucrum's AI CFO engine. Analyze this founder's financial data and generate exactly 4 insights.
 
 FINANCIAL DATA:
@@ -42,14 +112,8 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
   ...
 ]`
 
-    const result = await generateAIText({
-      prompt,
-      maxTokens: 800,
-      temperature: 0.25,
-      jsonMode: true,
-    })
-
-    const raw = result.text || '[]'
+    const rawText = await callHeavyAI(undefined, prompt)
+    const raw = rawText || '[]'
 
     // Strip any accidental markdown fences
     const clean = raw.replace(/```json|```/g, '').trim()
@@ -58,22 +122,12 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
     // Sort by priority
     insights.sort((a, b) => a.priority - b.priority)
 
-    return NextResponse.json({ insights })
+    return NextResponse.json({ insights, provider: 'lucrum-ai' })
   } catch (error: any) {
     console.error('[ai/insights] error:', error)
-    // Return safe fallback insights instead of crashing the dashboard
     return NextResponse.json({
-      insights: [
-        {
-          id: 'fallback_1',
-          type: 'opportunity',
-          title: 'AI insights loading...',
-          body: 'Connect a Gemini or Anthropic API key to enable AI-powered financial insights.',
-          action: 'Add API key',
-          metric: null,
-          priority: 1,
-        },
-      ],
+      insights: buildFallbackInsights(context),
+      provider: 'fallback',
     })
   }
 }

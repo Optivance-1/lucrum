@@ -13,7 +13,7 @@ type SettingsState = {
 const STORAGE_KEY = 'lucrum:dashboardSettings:v1'
 
 export default function DashboardSettingsPage() {
-  const { loading, error, lastRefreshed, refresh } = useStripeData()
+  const { loading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const [state, setState] = useState<SettingsState>({})
   const [saved, setSaved] = useState(false)
   const [accounts, setAccounts] = useState<{ id: string; label: string; active: boolean }[]>([])
@@ -56,6 +56,7 @@ export default function DashboardSettingsPage() {
       title="Dashboard Settings"
       subtitle={subtitle}
       error={error}
+      isDemoData={isDemoData}
       lastRefreshed={lastRefreshed}
       loading={loading}
       onRefresh={refresh}
@@ -119,6 +120,14 @@ export default function DashboardSettingsPage() {
 
         <p className="text-xs text-slate-aug mt-4">
           Stored locally in your browser. No server-side persistence yet.
+        </p>
+      </div>
+
+      <div className="glass gold-border rounded-2xl p-6 mt-6">
+        <h3 className="font-display text-base font-bold text-white mb-2">AI Runtime</h3>
+        <p className="text-slate-aug text-sm">
+          End-users do not need to provide Gemini or Anthropic keys. Lucrum uses server-managed providers and
+          gracefully falls back to deterministic CFO logic if providers are unavailable.
         </p>
       </div>
 
@@ -240,4 +249,3 @@ export default function DashboardSettingsPage() {
     </DashboardShell>
   )
 }
-

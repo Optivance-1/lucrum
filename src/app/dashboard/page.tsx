@@ -81,9 +81,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 // ─── Main dashboard ─────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { metrics, insights, loading, insightsLoading, error, lastRefreshed, refresh } = useStripeData()
+  const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'anthropic' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
 
   const askAI = useCallback(async (question: string) => {
@@ -113,9 +114,11 @@ export default function DashboardPage() {
         }),
       })
       const data = await res.json()
-      setAiResponse(data.answer ?? 'Could not get a response. Check your Anthropic API key.')
+      setAiProvider(data.provider ?? 'fallback')
+      setAiResponse(data.answer ?? 'Could not get a response right now.')
     } catch {
-      setAiResponse('Connection to AI CFO failed. Please check your ANTHROPIC_API_KEY.')
+      setAiProvider('fallback')
+      setAiResponse('AI advisor is running in local fallback mode right now. Try again in a few seconds.')
     } finally {
       setAiLoading(false)
     }
@@ -133,6 +136,7 @@ export default function DashboardPage() {
       title={`${new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}. ☀️`}
       subtitle={error ? <span className="text-crimson-aug">⚠ {error}</span> : loading ? 'Loading your financial data...' : `Last synced ${lastRefreshed ? timeAgo(Math.floor(lastRefreshed.getTime() / 1000)) : 'just now'} · auto-refreshes every 60s`}
       error={error}
+      isDemoData={isDemoData}
       lastRefreshed={lastRefreshed}
       loading={loading}
       onRefresh={refresh}
@@ -180,6 +184,19 @@ export default function DashboardPage() {
             change={metrics ? `$${metrics.availableBalance.toLocaleString()} available` : '—'}
             positive={runwayPositive}
           />
+        </div>
+
+        <div className="glass gold-border rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-1">Decision-grade Forecasting</p>
+            <p className="text-sm text-white">Monte Carlo Scenario Lab is live in Forecasts (P10/P50/P90 + action advice).</p>
+          </div>
+          <Link
+            href="/dashboard/forecasts"
+            className="px-4 py-2 rounded-xl bg-gold/10 border border-gold/20 text-gold hover:bg-gold/20 transition-all text-sm font-semibold whitespace-nowrap"
+          >
+            Open Forecasts
+          </Link>
         </div>
 
         {/* Charts row */}
@@ -312,7 +329,7 @@ export default function DashboardPage() {
                 })
               ) : !loading && (
                 <p className="text-slate-aug text-sm text-center py-4">
-                  Connect your Anthropic API key to enable AI insights
+                  AI insights are warming up. Refresh to regenerate recommendations.
                 </p>
               )}
             </div>
@@ -345,6 +362,11 @@ export default function DashboardPage() {
               {aiResponse && (
                 <div className="mt-3 p-4 rounded-xl bg-gold/5 border border-gold/20 fade-up">
                   <p className="text-sm text-white leading-relaxed">{aiResponse}</p>
+                  {aiProvider && (
+                    <p className="text-[11px] font-mono uppercase tracking-widest text-slate-aug mt-2">
+                      Source: {aiProvider}
+                    </p>
+                  )}
                 </div>
               )}
 

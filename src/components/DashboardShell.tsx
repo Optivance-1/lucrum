@@ -24,6 +24,7 @@ export default function DashboardShell({
   subtitle,
   headerAction,
   error,
+  isDemoData = false,
   lastRefreshed,
   loading,
   onRefresh,
@@ -33,6 +34,7 @@ export default function DashboardShell({
   subtitle?: React.ReactNode
   headerAction?: React.ReactNode
   error: string | null
+  isDemoData?: boolean
   lastRefreshed: Date | null
   loading: boolean
   onRefresh: () => Promise<void>
@@ -86,8 +88,12 @@ export default function DashboardShell({
 
         <div className="px-4 py-3 mx-4 mb-2 rounded-xl border border-[rgba(201,168,76,0.1)] bg-white/2">
           <div className="flex items-center gap-2">
-            {error ? <WifiOff className="w-3 h-3 text-crimson-aug" /> : <Wifi className="w-3 h-3 text-emerald-aug" />}
-            <span className="text-xs font-mono text-slate-aug">{error ? 'Disconnected' : 'Stripe connected'}</span>
+            {error
+              ? <WifiOff className="w-3 h-3 text-crimson-aug" />
+              : <Wifi className={`w-3 h-3 ${isDemoData ? 'text-gold' : 'text-emerald-aug'}`} />}
+            <span className="text-xs font-mono text-slate-aug">
+              {error ? 'Disconnected' : isDemoData ? 'Demo data mode' : 'Stripe connected'}
+            </span>
           </div>
           {lastRefreshed && !error && (
             <p className="text-xs text-slate-aug/50 font-mono mt-1 flex items-center gap-1">

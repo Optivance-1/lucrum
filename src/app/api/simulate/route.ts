@@ -10,6 +10,7 @@ import {
   type SimulationBaseline,
 } from '@/lib/simulation'
 import { generateAIText, type AIProvider } from '@/lib/ai'
+import { createMockSimulationBaseline, isDemoModeEnabled } from '@/lib/mockData'
 
 export const dynamic = 'force-dynamic'
 
@@ -398,7 +399,8 @@ async function buildBaseline(secretKey: string): Promise<SimulationBaseline> {
 export async function POST(req: NextRequest) {
   try {
     const secretKey = getStripeKeyFromCookies(req.cookies)
-    if (!secretKey) {
+    const demoMode = isDemoModeEnabled(req.nextUrl.searchParams.get('demo'))
+    if (!secretKey && !demoMode) {
       return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
     }
 
@@ -407,7 +409,9 @@ export async function POST(req: NextRequest) {
     const iterations = Number.isFinite(body.iterations) ? body.iterations : 10000
     const months = Number.isFinite(body.months) ? body.months : 18
 
-    const baseline = await buildBaseline(secretKey)
+    const baseline = secretKey
+      ? await buildBaseline(secretKey)
+      : createMockSimulationBaseline()
     const parsedScenario = parseScenario(scenarioText)
     const simulation = runMonteCarlo(baseline, parsedScenario, {
       iterations,

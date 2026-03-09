@@ -9,11 +9,15 @@ interface UseStripeDataReturn {
   loading: boolean
   insightsLoading: boolean
   error: string | null
+  isDemoData: boolean
   lastRefreshed: Date | null
   refresh: () => Promise<void>
 }
 
 const REFRESH_INTERVAL_MS = 60_000 // auto-refresh every 60s
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+const STRIPE_DATA_URL = DEMO_MODE ? '/api/stripe/data?demo=1' : '/api/stripe/data'
+const STRIPE_DEMO_URL = '/api/stripe/data?demo=1'
 
 export function useStripeData(): UseStripeDataReturn {
   const [metrics, setMetrics]           = useState<StripeMetrics | null>(null)
@@ -21,9 +25,11 @@ export function useStripeData(): UseStripeDataReturn {
   const [loading, setLoading]           = useState(true)
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [error, setError]               = useState<string | null>(null)
+  const [isDemoData, setIsDemoData]     = useState<boolean>(DEMO_MODE)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const cacheKeyRef = useRef<string>('lucrum:lastInsights:v1')
+  const usingDemoFallbackRef = useRef<boolean>(DEMO_MODE)
 
   const fetchInsights = useCallback(async (ctx: CFOContext) => {
     setInsightsLoading(true)
@@ -69,7 +75,18 @@ export function useStripeData(): UseStripeDataReturn {
 
   const fetchMetrics = useCallback(async () => {
     try {
-      const res = await fetch('/api/stripe/data')
+      const primaryUrl = usingDemoFallbackRef.current ? STRIPE_DEMO_URL : STRIPE_DATA_URL
+      let res = await fetch(primaryUrl)
+
+      // If Stripe is disconnected, transparently switch to demo payloads.
+      if (!res.ok && res.status === 401 && !usingDemoFallbackRef.current) {
+        const demoRes = await fetch(STRIPE_DEMO_URL)
+        if (demoRes.ok) {
+          usingDemoFallbackRef.current = true
+          res = demoRes
+        }
+      }
+
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -77,6 +94,7 @@ export function useStripeData(): UseStripeDataReturn {
       const data: StripeMetrics = await res.json()
       setMetrics(data)
       setError(null)
+      setIsDemoData(usingDemoFallbackRef.current || primaryUrl.includes('demo=1'))
       setLastRefreshed(new Date())
 
       // After we have metrics, fetch AI insights with the real context
@@ -119,5 +137,5 @@ export function useStripeData(): UseStripeDataReturn {
     await fetchMetrics()
   }, [fetchMetrics])
 
-  return { metrics, insights, loading, insightsLoading, error, lastRefreshed, refresh }
+  return { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh }
 }

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.66.0",
+    "@clerk/nextjs": "^7.0.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "framer-motion": "^11.3.0",

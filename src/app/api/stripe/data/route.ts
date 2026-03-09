@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
 import { calculateChurnRate, calculateMRRGrowth, calculateRunway, getLastNDays } from '@/lib/utils'
+import { createMockStripeMetrics, isDemoModeEnabled } from '@/lib/mockData'
 import type { StripeMetrics, DailyRevenue, StripeEvent, CashFlowPeriod, CohortRetentionRow, RevenueByPeriod, LeakageSummary } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -9,6 +10,13 @@ export async function GET(req: NextRequest) {
   try {
     const secretKey = getStripeKeyFromCookies(req.cookies)
     if (!secretKey) {
+      if (isDemoModeEnabled(req.nextUrl.searchParams.get('demo'))) {
+        return NextResponse.json(createMockStripeMetrics(), {
+          headers: {
+            'Cache-Control': 'no-store',
+          },
+        })
+      }
       return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
     }
 

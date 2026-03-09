@@ -24,13 +24,14 @@ function Skeleton({ className = '' }: { className?: string }) {
 }
 
 export default function RevenuePage() {
-  const { metrics, loading, error, lastRefreshed, refresh } = useStripeData()
+  const { metrics, loading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
 
   return (
     <DashboardShell
       title="Revenue Reality Dashboard"
       subtitle={error ? <span className="text-crimson-aug">⚠ {error}</span> : 'Gross vs net revenue, effective fee rate, and payout timeline'}
       error={error}
+      isDemoData={isDemoData}
       lastRefreshed={lastRefreshed}
       loading={loading}
       onRefresh={refresh}

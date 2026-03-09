@@ -1,11 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { CFOContext } from '@/types'
-import { generateAIText } from '@/lib/ai'
+import { callChatAI } from '@/lib/ai-client'
+
+function fmtNumber(value: number | undefined, suffix = ''): string {
+  if (value == null || Number.isNaN(value)) return 'unknown'
+  return `${value}${suffix}`
+}
+
+function buildFallbackAnswer(question: string, ctx: Partial<CFOContext>): string {
+  const q = question.toLowerCase()
+  const runway = ctx.runway
+  const churn = ctx.churnRate
+  const mrr = ctx.mrr
+  const growth = ctx.mrrGrowth
+  const revenue = ctx.revenue30d
+
+  if (/runway|cash|burn/.test(q)) {
+    if (runway == null) {
+      return 'Cash timing data is incomplete. Track payouts, refunds, and fixed costs daily so runway projections stop guessing.'
+    }
+    if (runway < 90) {
+      return `You have about ${runway} days of runway. Freeze non-core spend and cut one expense this week to extend runway before you chase growth.`
+    }
+    return `You have roughly ${runway} days of runway. Keep burn disciplined and push one high-confidence growth channel instead of broad experimentation.`
+  }
+
+  if (/price|pricing|raise/.test(q)) {
+    if (churn != null && churn > 6) {
+      return `Don't raise prices yet. Churn is ${churn}%, so improve retention first or you'll leak customers faster than pricing lifts MRR.`
+    }
+    if (mrr != null && growth != null) {
+      return `Test a controlled 8-12% price lift on new signups. MRR is $${mrr} with ${growth}% MoM growth, so run the test and watch churn for 2 billing cycles.`
+    }
+  }
+
+  if (/churn|cancel/.test(q)) {
+    return `Focus on saves before acquisition. Current churn is ${fmtNumber(churn, '%')}; trigger win-back offers for at-risk accounts and audit failed-payment recovery weekly.`
+  }
+
+  return `Current snapshot: MRR $${fmtNumber(mrr)}, 30-day revenue $${fmtNumber(revenue)}, runway ${fmtNumber(runway, ' days')}. Pick one lever this week: cut low-ROI spend, improve retention, or test pricing on new users only.`
+}
 
 export async function POST(req: NextRequest) {
-  try {
-    const { question, context }: { question: string; context?: Partial<CFOContext> } = await req.json()
+  const payload = await req.json().catch(() => ({})) as {
+    question?: string
+    context?: Partial<CFOContext>
+  }
+  const question = payload.question ?? ''
+  const context = payload.context
 
+  try {
     if (!question?.trim()) {
       return NextResponse.json({ error: 'No question provided' }, { status: 400 })
     }
@@ -35,16 +79,14 @@ RESPONSE RULES:
 4. If data is missing, say exactly what you'd need to answer better
 5. Never start with "Great question" or any fluff opener`
 
-    const result = await generateAIText({
-      system,
-      prompt: question,
-      maxTokens: 350,
-      temperature: 0.35,
-    })
+    const answer = await callChatAI(system, question)
 
-    return NextResponse.json({ answer: result.text, provider: result.provider })
+    return NextResponse.json({ answer, provider: 'lucrum-ai' })
   } catch (error: any) {
     console.error('[ai/cfo] error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({
+      answer: buildFallbackAnswer(question, context ?? {}),
+      provider: 'fallback',
+    })
   }
 }

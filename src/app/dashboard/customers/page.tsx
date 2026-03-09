@@ -10,13 +10,14 @@ function Skeleton({ className = '' }: { className?: string }) {
 }
 
 export default function CustomersPage() {
-  const { metrics, loading, error, lastRefreshed, refresh } = useStripeData()
+  const { metrics, loading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
 
   return (
     <DashboardShell
       title="Churn & Retention Intelligence"
       subtitle={error ? <span className="text-crimson-aug">⚠ {error}</span> : 'Passive churn, cohort retention, and recovery estimates'}
       error={error}
+      isDemoData={isDemoData}
       lastRefreshed={lastRefreshed}
       loading={loading}
       onRefresh={refresh}

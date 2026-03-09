@@ -11,6 +11,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Actual cash runway** — balance vs real monthly burn
 - **AI-generated insights** — dynamic, based on your real numbers
 - **Conversational AI CFO** — powered by Claude, with your real metrics as context
+- **Monte Carlo scenario lab** — probabilistic runway + cash ranges (P10/P50/P90)
 
 ## Tech Stack
 
@@ -45,6 +46,18 @@ ANTHROPIC_API_KEY=sk-ant-... # optional fallback
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 COOKIE_ENCRYPTION_KEY=replace_with_a_long_random_secret
 ```
+
+Optional demo mode (no Stripe connection required):
+```env
+NEXT_PUBLIC_DEMO_MODE=true
+LUCRUM_DEMO_MODE=true
+```
+
+## AI Key Handling
+
+- End users do **not** need to enter Gemini/Anthropic API keys.
+- AI runs server-side with your deployment keys.
+- If model providers are unavailable, Lucrum falls back to deterministic CFO logic so the dashboard still works.
 
 ### 3. Run the dev server
 ```bash
