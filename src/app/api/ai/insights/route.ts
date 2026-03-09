@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import type { CFOContext, AIInsight } from '@/types'
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+import { generateAIText } from '@/lib/ai'
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,13 +42,14 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
   ...
 ]`
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
+    const result = await generateAIText({
+      prompt,
+      maxTokens: 800,
+      temperature: 0.25,
+      jsonMode: true,
     })
 
-    const raw = message.content[0].type === 'text' ? message.content[0].text : '[]'
+    const raw = result.text || '[]'
 
     // Strip any accidental markdown fences
     const clean = raw.replace(/```json|```/g, '').trim()
@@ -69,7 +68,7 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
           id: 'fallback_1',
           type: 'opportunity',
           title: 'AI insights loading...',
-          body: 'Connect your Anthropic API key to enable AI-powered financial insights.',
+          body: 'Connect a Gemini or Anthropic API key to enable AI-powered financial insights.',
           action: 'Add API key',
           metric: null,
           priority: 1,

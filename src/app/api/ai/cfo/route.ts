@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import type { CFOContext } from '@/types'
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+import { generateAIText } from '@/lib/ai'
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,15 +35,14 @@ RESPONSE RULES:
 4. If data is missing, say exactly what you'd need to answer better
 5. Never start with "Great question" or any fluff opener`
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 350,
+    const result = await generateAIText({
       system,
-      messages: [{ role: 'user', content: question }],
+      prompt: question,
+      maxTokens: 350,
+      temperature: 0.35,
     })
 
-    const answer = message.content[0].type === 'text' ? message.content[0].text : ''
-    return NextResponse.json({ answer })
+    return NextResponse.json({ answer: result.text, provider: result.provider })
   } catch (error: any) {
     console.error('[ai/cfo] error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

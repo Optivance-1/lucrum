@@ -18,7 +18,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Styling**: Tailwind CSS + custom design system
 - **Charts**: Recharts
 - **Payments Data**: Stripe API v2023-10-16
-- **AI Engine**: Anthropic Claude (claude-sonnet-4-20250514)
+- **AI Engine**: Gemini (cost-first default) with Anthropic fallback
 - **Language**: TypeScript
 
 ## Getting Started
@@ -38,7 +38,10 @@ Fill in your keys:
 STRIPE_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-ANTHROPIC_API_KEY=sk-ant-...
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-1.5-flash
+ANTHROPIC_API_KEY=sk-ant-... # optional fallback
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 COOKIE_ENCRYPTION_KEY=replace_with_a_long_random_secret
 ```

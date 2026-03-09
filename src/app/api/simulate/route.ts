@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
 import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
 import {
@@ -10,12 +9,9 @@ import {
   type MonteCarloOutput,
   type SimulationBaseline,
 } from '@/lib/simulation'
+import { generateAIText, type AIProvider } from '@/lib/ai'
 
 export const dynamic = 'force-dynamic'
-
-const anthropicClient = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null
 
 type SimulateRequestBody = {
   user_id?: string
@@ -27,7 +23,7 @@ type SimulateRequestBody = {
 type AdviceResult = {
   text: string
   confidence: number
-  source: 'anthropic' | 'fallback'
+  source: AIProvider | 'fallback'
 }
 
 type BalanceTransaction = {
@@ -202,12 +198,6 @@ async function generateAdvice(
   const cached = adviceCache.get(cacheKey)
   if (cached) return cached
 
-  if (!anthropicClient) {
-    const fallback = buildFallbackAdvice(scenario, baseline, sim)
-    adviceCache.set(cacheKey, fallback)
-    return fallback
-  }
-
   try {
     const system = `You are Lucrum, an AI CFO for solo founders. Be blunt and practical.
 Recommend exactly ONE action: drop, add, or optimize.
@@ -229,26 +219,23 @@ ${summarizeSimForPrompt(sim)}
 Respond as strict JSON only:
 {"advice":"...", "confidence": 0-100}`
 
-    const response = await anthropicClient.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 220,
-      temperature: 0.4,
+    const response = await generateAIText({
       system,
-      messages: [{ role: 'user', content: user }],
+      prompt: user,
+      maxTokens: 220,
+      temperature: 0.4,
+      jsonMode: true,
     })
 
-    const text = response.content.find(block => block.type === 'text')
-    if (text?.type === 'text') {
-      const parsed = parseAdvicePayload(text.text)
-      if (parsed) {
-        const value: AdviceResult = {
-          text: parsed.advice,
-          confidence: parsed.confidence,
-          source: 'anthropic',
-        }
-        adviceCache.set(cacheKey, value)
-        return value
+    const parsed = parseAdvicePayload(response.text)
+    if (parsed) {
+      const value: AdviceResult = {
+        text: parsed.advice,
+        confidence: parsed.confidence,
+        source: response.provider,
       }
+      adviceCache.set(cacheKey, value)
+      return value
     }
   } catch {
     // Fall through to deterministic fallback
