@@ -242,4 +242,84 @@ export async function callStructuredAI(system: string | undefined, user: string)
   return callAiWithRouting('structured', system, user)
 }
 
+export function stripThinking(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+}
 
+export async function callVisionAI(prompt: string, fileBase64: string, mimeType: string): Promise<string> {
+  // 1. Groq vision (Llama 4 Scout supports vision)
+  const groqKey = process.env.GROQ_API_KEY
+  if (groqKey) {
+    try {
+      const res = await withTimeout(
+        fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            model: process.env.GROQ_CHAT_MODEL || 'meta-llama/llama-4-scout',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+                  { type: 'text', text: prompt },
+                ],
+              },
+            ],
+            temperature: 0.2,
+            max_tokens: 500,
+            stream: false,
+          }),
+        }),
+        15_000
+      )
+      if (res.ok) {
+        const data: any = await res.json()
+        const content = data?.choices?.[0]?.message?.content
+        if (typeof content === 'string' && content.trim()) return content.trim()
+      }
+    } catch (err) {
+      logFailure('vision:groq', err)
+    }
+  }
+
+  // 2. Gemini 2.0 Flash
+  const geminiKey = process.env.GOOGLE_AI_API_KEY
+  if (geminiKey) {
+    try {
+      const res = await withTimeout(
+        fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    { inline_data: { mime_type: mimeType, data: fileBase64 } },
+                    { text: prompt },
+                  ],
+                },
+              ],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 500 },
+            }),
+          }
+        ),
+        15_000
+      )
+      if (res.ok) {
+        const data: any = await res.json()
+        const content = data?.candidates?.[0]?.content?.parts?.[0]?.text
+        if (typeof content === 'string' && content.trim()) return content.trim()
+      }
+    } catch (err) {
+      logFailure('vision:gemini', err)
+    }
+  }
+
+  return 'Document analysis unavailable. Please enter values manually.'
+}

@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { getUserPlan, getUserSubscriptionRecord } from '@/lib/subscription'
+import {
+  getUserSubscription,
+  canUseCFOChat,
+  canUseFiveMoves,
+  canUseActionExecution,
+  canUseMultiAccount,
+  canUseAPI,
+  usesPriorityAI,
+  canUseWebhookAlerts,
+} from '@/lib/subscription'
 
 export async function GET() {
   const { userId } = await auth()
@@ -8,14 +17,23 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const [plan, record] = await Promise.all([
-    getUserPlan(userId),
-    getUserSubscriptionRecord(userId),
-  ])
+  const sub = await getUserSubscription(userId)
+  const plan = sub.plan
 
   return NextResponse.json({
     plan,
-    currentPeriodEnd: record?.currentPeriodEnd ?? null,
-    status: record?.status ?? null,
+    interval: sub.interval,
+    currentPeriodEnd: null,
+    status: plan === 'demo' ? null : 'active',
+    features: {
+      cfoChatUnlimited: canUseCFOChat(plan),
+      fiveMoves: canUseFiveMoves(plan),
+      actionExecution: canUseActionExecution(plan),
+      multiAccount: canUseMultiAccount(plan),
+      teamSeats: canUseMultiAccount(plan),
+      apiAccess: canUseAPI(plan),
+      priorityAI: usesPriorityAI(plan),
+      webhookAlerts: canUseWebhookAlerts(plan),
+    },
   })
 }

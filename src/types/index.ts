@@ -1,3 +1,20 @@
+// ─── Plan & Billing ────────────────────────────────────────────────────────
+
+export type Plan = 'demo' | 'solo' | 'enterprise'
+export type BillingInterval = 'month' | 'year'
+
+export interface Subscription {
+  plan: Plan
+  interval?: BillingInterval
+  activatedAt?: number
+  expiresAt?: number
+  stripeCustomerId?: string
+  stripeSubscriptionId?: string
+  teamMembers?: string[]
+  connectedAccounts?: string[]
+  apiKey?: string
+}
+
 // ─── Stripe Data ────────────────────────────────────────────────────────────
 
 export interface DailyRevenue {
@@ -69,6 +86,11 @@ export interface StripeMetrics {
 
   // Leakage
   leakageSummary: LeakageSummary
+
+  // Simulation (attached after compute)
+  simulation?: SimulationResult
+  topDecisions?: DecisionScore[]
+  customers?: StripeCustomer[]
 
   // Meta
   currency: string
@@ -145,6 +167,11 @@ export interface CFOContext {
   cancelledSubscriptions30d: number
   accountAgeDays?: number
   benchmarks?: BenchmarkReport
+  simulation?: SimulationResult
+  topMove?: Move
+  estimatedMonthlyBurn?: number
+  failedPaymentsValue?: number
+  failedPaymentsCount?: number
 }
 
 // ─── API Responses ───────────────────────────────────────────────────────────
@@ -154,7 +181,148 @@ export interface ApiResponse<T> {
   error?: string
 }
 
-// ─── Simulation ────────────────────────────────────────────────────────────
+// ─── Stripe Customers ──────────────────────────────────────────────────────
+
+export interface StripeCustomer {
+  id: string
+  email: string
+  name: string
+  created: number
+  subscriptionId?: string
+  subscriptionStatus?: string
+  plan?: string
+  mrr: number
+  totalRevenue: number
+  lastPaymentStatus?: string
+  lastPaymentDate?: number
+  churnRisk: 'low' | 'medium' | 'high'
+  expansionEligible: boolean
+  daysSinceCreated: number
+}
+
+// ─── Decision Scorer ───────────────────────────────────────────────────────
+
+export interface DecisionScoreBreakdown {
+  revenueImpact: number
+  timeToRevenue: number
+  confidence: number
+  reversibility: number
+  burnImpact: number
+  churnImpact: number
+}
+
+export interface DecisionScore {
+  actionType: string
+  label: string
+  params: Record<string, any>
+  scores: DecisionScoreBreakdown
+  compositeScore: number
+  riskTier: 1 | 2 | 3 | 4 | 5
+  estimatedDollarImpact: number
+  worstCaseImpact: number
+  successProbability: number
+  timeToImpact: 'immediate' | 'days' | 'weeks' | 'months'
+}
+
+// ─── Monte Carlo Simulation ────────────────────────────────────────────────
+
+export interface RunwayDistribution {
+  p10: number
+  p25: number
+  p50: number
+  p75: number
+  p90: number
+  mean: number
+  probabilityOf60Days: number
+  probabilityOf90Days: number
+  probabilityOf180Days: number
+  probabilityOf365Days: number
+  probabilityOf730Days: number
+}
+
+export interface ForecastPoint {
+  p25: number
+  p50: number
+  p75: number
+}
+
+export interface MRRForecast {
+  month3: ForecastPoint
+  month6: ForecastPoint
+  month12: ForecastPoint
+  month24: ForecastPoint
+}
+
+export interface SimScenario {
+  probability: number
+  runway: number
+  mrr3mo: number
+  mrr12mo: number
+  description: string
+}
+
+export interface SimulationResult {
+  runway: RunwayDistribution
+  mrrForecast: MRRForecast
+  scenarios: { bear: SimScenario; base: SimScenario; bull: SimScenario }
+  riskScore: number
+  volatilityScore: number
+  breakEvenProbability: number
+  baselineRunwayP50: number
+  decisionLiftP50: number
+  nSimulations: number
+  computedAt: number
+  horizonMonths: number
+}
+
+export interface SimulationConfig {
+  currentMRR: number
+  currentBalance: number
+  monthlyBurn: number
+  mrrGrowthRate: number
+  churnRate: number
+  appliedDecision?: {
+    actionType: string
+    successProbability: number
+  } | null
+}
+
+// ─── Five Moves ────────────────────────────────────────────────────────────
+
+export type MoveRisk = 'cutthroat' | 'aggressive' | 'balanced' | 'conservative' | 'safe'
+
+export interface Move {
+  rank: 1 | 2 | 3 | 4 | 5
+  risk: MoveRisk
+  riskLabel: string
+  riskColor: string
+  title: string
+  summary: string
+  rationale: string
+  tradeoff: string
+  actions: DecisionScore[]
+  simulation: SimulationResult
+  metrics: {
+    expectedRunwayGain: number
+    expectedMRRAt90d: number
+    expectedMRRAt365d: number
+    survivalProbability: number
+    expectedDollarImpact: number
+    riskOfBackfire: number
+    compositeScore: number
+  }
+  maxStatement: string
+  timeToExecute: string
+}
+
+export interface FiveMovesResult {
+  moves: Move[]
+  baselineSimulation: SimulationResult
+  generatedAt: number
+  dataQuality: 'high' | 'medium' | 'low'
+}
+
+// ─── Legacy Simulation (kept for forecasts page) ───────────────────────────
 
 export interface SimulationPercentiles {
   p10: number

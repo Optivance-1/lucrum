@@ -1,12 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { UserPlan } from '@/lib/subscription'
+import type { Plan } from '@/types'
 
 type BillingState = {
-  plan: UserPlan
+  plan: Plan
+  interval?: 'month' | 'year'
   currentPeriodEnd: number | null
   status: string | null
+  features?: Record<string, boolean>
 }
 
 export function useUserPlan() {
@@ -20,7 +22,7 @@ export function useUserPlan() {
       const next = await res.json()
       setData(next)
     } catch {
-      setData({ plan: 'free', currentPeriodEnd: null, status: null })
+      setData({ plan: 'demo', currentPeriodEnd: null, status: null })
     } finally {
       setLoading(false)
     }
@@ -31,9 +33,11 @@ export function useUserPlan() {
   }, [refresh])
 
   return {
-    plan: data?.plan ?? 'free',
+    plan: (data?.plan ?? 'demo') as Plan,
+    interval: data?.interval,
     currentPeriodEnd: data?.currentPeriodEnd ?? null,
     status: data?.status ?? null,
+    features: data?.features ?? {},
     loading,
     refresh,
   }

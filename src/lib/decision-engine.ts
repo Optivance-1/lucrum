@@ -16,9 +16,9 @@ export type DecisionEngineReadiness = {
 export async function getDecisionEngineReadiness(userId: string): Promise<DecisionEngineReadiness> {
   const plan = await getUserPlan(userId)
   const blockers =
-    plan === 'pro'
+    plan === 'solo' || plan === 'enterprise'
       ? []
-      : ['Upgrade to Pro before enabling automated decision execution.']
+      : ['Upgrade to Solo Dev or Enterprise before enabling automated decision execution.']
 
   return {
     ready: blockers.length === 0,

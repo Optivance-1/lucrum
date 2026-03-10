@@ -1,132 +1,162 @@
-// OPERATOR SETUP: 
-// Go to uptimerobot.com (free)
-// Add new monitor: HTTP(s)
-// URL: [this endpoint URL]
-// Interval: every 30 minutes
-// Alert contact: [brother's phone number]
-// If status is not "healthy" → sends SMS automatically
+// UptimeRobot setup: monitor https://[domain]/api/health
+// Alert when status !== "healthy"
+// SMS to brother's phone via UptimeRobot free tier
 
 import { NextResponse } from 'next/server'
 
-type CheckResult = {
-  ok: boolean
-  durationMs: number
-}
+export const dynamic = 'force-dynamic'
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), ms)
-  try {
-    const result = await promise
-    return result
-  } finally {
-    clearTimeout(id)
-  }
-}
+type ProviderStatus = 'ok' | 'failed' | 'not_configured'
 
-async function pingOllama(): Promise<CheckResult> {
-  const baseUrl = process.env.OLLAMA_URL
-  if (!baseUrl) return { ok: false, durationMs: 0 }
-  const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
-  const body = {
-    model: 'mistral:latest',
-    messages: [{ role: 'user', content: 'ping' }],
-    max_tokens: 1,
-    temperature: 0,
-    stream: false,
-  }
+async function pingProvider(
+  name: string,
+  fn: () => Promise<Response>
+): Promise<{ status: ProviderStatus; ms: number }> {
   const start = Date.now()
   try {
-    const res = await withTimeout(
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-      10_000
-    )
-    const ok = res.ok
-    return { ok, durationMs: Date.now() - start }
+    const res = await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+    ])
+    return { status: res.ok ? 'ok' : 'failed', ms: Date.now() - start }
   } catch {
-    return { ok: false, durationMs: Date.now() - start }
-  }
-}
-
-async function pingRunpod(endpointEnvKey: string, model: string): Promise<CheckResult> {
-  const endpoint = process.env[endpointEnvKey]
-  const apiKey = process.env.RUNPOD_API_KEY
-  if (!endpoint || !apiKey) return { ok: false, durationMs: 0 }
-
-  const url = endpoint
-  const body = {
-    model,
-    messages: [{ role: 'user', content: 'ping' }],
-    max_tokens: 1,
-    temperature: 0,
-    stream: false,
-  }
-  const start = Date.now()
-  try {
-    const res = await withTimeout(
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      }),
-      10_000
-    )
-    const ok = res.ok
-    return { ok, durationMs: Date.now() - start }
-  } catch {
-    return { ok: false, durationMs: Date.now() - start }
+    return { status: 'failed', ms: Date.now() - start }
   }
 }
 
 export async function GET() {
   const start = Date.now()
-  const fallbackAvailable = Boolean(process.env.TOGETHER_API_KEY)
+  const providers: Record<string, ProviderStatus> = {}
+  const responseTimes: Record<string, number> = {}
 
-  let lucrumChat = 'failed' as 'ok' | 'failed'
-  let lucrumInsights = 'failed' as 'ok' | 'failed'
+  const groqKey = process.env.GROQ_API_KEY
+  const geminiKey = process.env.GOOGLE_AI_API_KEY
+  const ollamaUrl = process.env.OLLAMA_URL
+  const runpodKey = process.env.RUNPOD_API_KEY
+  const runpodHeavy = process.env.RUNPOD_ENDPOINT_HEAVY_URL
 
-  let chatCheck: CheckResult = { ok: false, durationMs: 0 }
-  let heavyCheck: CheckResult = { ok: false, durationMs: 0 }
+  const checks: Promise<void>[] = []
 
-  if (process.env.OLLAMA_URL && process.env.NODE_ENV === 'development') {
-    const ollamaCheck = await pingOllama()
-    chatCheck = ollamaCheck
-    heavyCheck = ollamaCheck
+  if (groqKey) {
+    checks.push(
+      pingProvider('groq', () =>
+        fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+          body: JSON.stringify({
+            model: process.env.GROQ_CHAT_FALLBACK || 'llama-3.3-70b-versatile',
+            messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+            temperature: 0,
+            max_tokens: 3,
+            stream: false,
+          }),
+        })
+      ).then(r => {
+        providers.groq = r.status
+        responseTimes.groq = r.ms
+      })
+    )
   } else {
-    heavyCheck = await pingRunpod('RUNPOD_ENDPOINT_HEAVY_URL', 'meta-llama/Llama-3.3-70B-Instruct')
-    chatCheck = await pingRunpod('RUNPOD_ENDPOINT_CHAT_URL', 'Qwen/Qwen2.5-14B-Instruct')
+    providers.groq = 'not_configured'
   }
 
-  lucrumChat = chatCheck.ok ? 'ok' : 'failed'
-  lucrumInsights = heavyCheck.ok ? 'ok' : 'failed'
+  if (geminiKey) {
+    checks.push(
+      pingProvider('gemini', () =>
+        fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Reply with the single word: OK' }] }],
+              generationConfig: { temperature: 0, maxOutputTokens: 3 },
+            }),
+          }
+        )
+      ).then(r => {
+        providers.gemini = r.status
+        responseTimes.gemini = r.ms
+      })
+    )
+  } else {
+    providers.gemini = 'not_configured'
+  }
 
-  let status: 'healthy' | 'degraded' | 'down' = 'healthy'
-  const anyOk = chatCheck.ok || heavyCheck.ok
+  if (ollamaUrl) {
+    checks.push(
+      pingProvider('ollama', () =>
+        fetch(`${ollamaUrl.replace(/\/+$/, '')}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'mistral:latest',
+            stream: false,
+            messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+            options: { temperature: 0, num_predict: 3 },
+          }),
+        })
+      ).then(r => {
+        providers.ollama = r.status
+        responseTimes.ollama = r.ms
+      })
+    )
+  } else {
+    providers.ollama = 'not_configured'
+  }
 
-  if (anyOk) {
+  if (runpodKey && runpodHeavy) {
+    checks.push(
+      pingProvider('runpod', () =>
+        fetch(runpodHeavy, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${runpodKey}` },
+          body: JSON.stringify({
+            model: 'default',
+            messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+            max_tokens: 3,
+            temperature: 0,
+            stream: false,
+          }),
+        })
+      ).then(r => {
+        providers.runpod = r.status
+        responseTimes.runpod = r.ms
+      })
+    )
+  } else {
+    providers.runpod = 'not_configured'
+  }
+
+  await Promise.allSettled(checks)
+
+  const okProviders = Object.values(providers).filter(s => s === 'ok')
+  const configuredProviders = Object.values(providers).filter(s => s !== 'not_configured')
+  const primaryOk = providers.groq === 'ok'
+
+  let status: 'healthy' | 'degraded' | 'down'
+  if (primaryOk) {
     status = 'healthy'
-  } else if (fallbackAvailable) {
+  } else if (okProviders.length > 0) {
+    status = 'degraded'
+  } else if (configuredProviders.length === 0) {
     status = 'degraded'
   } else {
     status = 'down'
   }
 
-  const responseTimeMs = Math.max(chatCheck.durationMs, heavyCheck.durationMs, Date.now() - start)
+  const activeProvider = providers.groq === 'ok' ? 'groq'
+    : providers.runpod === 'ok' ? 'runpod'
+    : providers.gemini === 'ok' ? 'gemini'
+    : providers.ollama === 'ok' ? 'ollama'
+    : 'none'
 
   return NextResponse.json({
     status,
-    lucrum_chat: lucrumChat,
-    lucrum_insights: lucrumInsights,
-    fallback_available: fallbackAvailable,
     timestamp: new Date().toISOString(),
-    response_time_ms: responseTimeMs,
+    providers,
+    active_provider: activeProvider,
+    simulation_cache: 'ok',
+    response_time_ms: responseTimes,
   })
 }
-

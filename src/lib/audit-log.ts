@@ -1,9 +1,5 @@
-import { promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
-
-// NOTE: Phase 1 storage uses local filesystem under /tmp.
-// Phase 2 will migrate this to Postgres without changing the public API.
+import { safeKvGet, safeKvSet } from '@/lib/kv'
 
 export interface AuditEntry {
   id: string
@@ -19,31 +15,27 @@ export interface AuditEntry {
   maxRecommended: boolean
   executedAt: string
   stripeRequestId?: string
+  status: 'pending' | 'success' | 'failed'
 }
 
-function getAuditFilePath(userId: string): string {
-  // Use a stable, user-specific file name under /tmp.
-  // On Vercel and most Linux hosts /tmp is writable per deployment.
-  const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return join('/tmp', `lucrum-audit-${safeUserId}.jsonl`)
-}
+const MAX_INDEX_SIZE = 200
 
 export async function writeAuditEntry(
-  entry: Omit<AuditEntry, 'id'>
+  entry: Omit<AuditEntry, 'id' | 'status'> & { status?: AuditEntry['status'] }
 ): Promise<AuditEntry> {
   const withId: AuditEntry = {
     ...entry,
     id: randomUUID(),
+    status: entry.status ?? (entry.success ? 'success' : 'failed'),
   }
 
-  const line = JSON.stringify(withId)
-  const file = getAuditFilePath(entry.userId)
+  const entryKey = `audit:${entry.userId}:${withId.id}`
+  await safeKvSet(entryKey, withId, 90 * 86400)
 
-  try {
-    await fs.appendFile(file, `${line}\n`, 'utf8')
-  } catch {
-    // Best-effort logging only — do not break the main flow.
-  }
+  const indexKey = `audit_index:${entry.userId}`
+  const existing = await safeKvGet<string[]>(indexKey) ?? []
+  const updated = [entryKey, ...existing].slice(0, MAX_INDEX_SIZE)
+  await safeKvSet(indexKey, updated)
 
   return withId
 }
@@ -53,41 +45,30 @@ export async function readAuditLog(
   limit = 50,
   offset = 0
 ): Promise<AuditEntry[]> {
-  const file = getAuditFilePath(userId)
+  const indexKey = `audit_index:${userId}`
+  const keys = await safeKvGet<string[]>(indexKey)
+  if (!keys?.length) return []
 
-  let data: string
-  try {
-    data = await fs.readFile(file, 'utf8')
-  } catch (err: any) {
-    if (err && err.code === 'ENOENT') return []
-    return []
-  }
-
-  const lines = data
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-
+  const slice = keys.slice(offset, offset + limit)
   const entries: AuditEntry[] = []
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as AuditEntry
-      entries.push(parsed)
-    } catch {
-      // Skip malformed lines
-    }
+
+  for (const key of slice) {
+    const entry = await safeKvGet<AuditEntry>(key)
+    if (entry) entries.push(entry)
   }
 
-  // Newest first (executedAt descending), then id as tie-breaker
-  entries.sort((a, b) => {
-    if (a.executedAt === b.executedAt) {
-      return a.id < b.id ? 1 : -1
-    }
-    return a.executedAt < b.executedAt ? 1 : -1
-  })
-
-  const start = offset
-  const end = offset + limit
-  return entries.slice(start, end)
+  return entries
 }
 
+export async function updateAuditEntry(
+  userId: string,
+  id: string,
+  updates: Partial<AuditEntry>
+): Promise<void> {
+  const entryKey = `audit:${userId}:${id}`
+  const existing = await safeKvGet<AuditEntry>(entryKey)
+  if (!existing) return
+
+  const merged = { ...existing, ...updates }
+  await safeKvSet(entryKey, merged, 90 * 86400)
+}

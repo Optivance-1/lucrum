@@ -121,6 +121,10 @@ export function useStripeData(): UseStripeDataReturn {
         cancelledSubscriptions30d: data.cancelledSubscriptions30d,
         accountAgeDays: data.accountAgeDays,
         benchmarks: data.benchmarks,
+        simulation: data.simulation,
+        estimatedMonthlyBurn: data.estimatedMonthlyBurn,
+        failedPaymentsValue: data.failedPaymentsValue,
+        failedPaymentsCount: data.failedPaymentsCount,
       }
       fetchInsights(ctx)
     } catch (err: any) {

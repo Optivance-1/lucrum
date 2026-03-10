@@ -28,14 +28,16 @@ export async function safeKvGet<T>(key: string): Promise<T | null> {
 export async function safeKvSet(
   key: string,
   value: unknown,
-  options?: { ex?: number }
+  optionsOrTtl?: { ex?: number } | number
 ): Promise<boolean> {
   const kv = getKvClient()
   if (!kv) return false
 
+  const ex = typeof optionsOrTtl === 'number' ? optionsOrTtl : optionsOrTtl?.ex
+
   try {
-    if (options?.ex) {
-      await kv.set(key, value, { ex: options.ex })
+    if (ex) {
+      await kv.set(key, value, { ex })
     } else {
       await kv.set(key, value)
     }
