@@ -119,6 +119,8 @@ export function useStripeData(): UseStripeDataReturn {
         availableBalance: data.availableBalance,
         runway: data.runway,
         cancelledSubscriptions30d: data.cancelledSubscriptions30d,
+        accountAgeDays: data.accountAgeDays,
+        benchmarks: data.benchmarks,
       }
       fetchInsights(ctx)
     } catch (err: any) {

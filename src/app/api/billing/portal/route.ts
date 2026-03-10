@@ -15,6 +15,9 @@ export async function POST(req: NextRequest) {
     }
 
     const stripe = getLucrumStripe()
+    if (!stripe) {
+      return NextResponse.json({ error: 'Billing not configured' }, { status: 503 })
+    }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,

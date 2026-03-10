@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   BarChart2, DollarSign, Users, TrendingUp, Brain,
   Settings, LogOut, RefreshCw, Wifi, WifiOff, Clock,
+  Zap, ClipboardList,
 } from 'lucide-react'
 import { timeAgo } from '@/lib/utils'
 
@@ -15,6 +16,8 @@ const NAV_ITEMS = [
   { icon: Users, label: 'Customers', href: '/dashboard/customers' },
   { icon: TrendingUp, label: 'Forecasts', href: '/dashboard/forecasts' },
   { icon: Brain, label: 'AI Insights', href: '/dashboard/insights' },
+  { icon: Zap, label: 'Actions', href: '/dashboard' },
+  { icon: ClipboardList, label: 'Audit Log', href: '/dashboard/audit' },
   { icon: Settings, label: 'Settings', href: '/dashboard/settings' },
 ] as const
 

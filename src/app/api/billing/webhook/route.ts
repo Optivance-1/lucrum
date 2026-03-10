@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
   }
 
   const stripe = getLucrumStripe()
+  if (!stripe) {
+    return NextResponse.json({ error: 'Billing not configured' }, { status: 503 })
+  }
 
   let event: Stripe.Event
   try {

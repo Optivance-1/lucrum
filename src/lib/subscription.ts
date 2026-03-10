@@ -23,11 +23,9 @@ function getBillingKey(name: string, userId: string): string {
   return `lucrum:${name}:${userId}`
 }
 
-export function getLucrumStripe(): Stripe {
+export function getLucrumStripe(): Stripe | null {
   const secretKey = process.env.LUCRUM_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY
-  if (!secretKey) {
-    throw new Error('LUCRUM_STRIPE_SECRET_KEY is not configured')
-  }
+  if (!secretKey) return null
 
   return new Stripe(secretKey, {
     apiVersion: STRIPE_API_VERSION,

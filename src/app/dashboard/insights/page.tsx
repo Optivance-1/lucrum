@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useStripeData } from '@/hooks/useStripeData'
 import DashboardShell from '@/components/DashboardShell'
-import { Brain, ChevronRight, AlertTriangle, TrendingUp, CheckCircle } from 'lucide-react'
+import { Brain, ChevronRight, AlertTriangle, TrendingUp, CheckCircle, Star } from 'lucide-react'
 import type { AIInsight, InsightSeverity } from '@/types'
 
 const INSIGHT_STYLES: Record<InsightSeverity, {
@@ -13,6 +13,7 @@ const INSIGHT_STYLES: Record<InsightSeverity, {
   warning: { border: 'border-yellow-500/35', bg: 'bg-yellow-500/6', icon: AlertTriangle, iconColor: 'text-yellow-400' },
   opportunity: { border: 'border-gold/30', bg: 'bg-gold/5', icon: TrendingUp, iconColor: 'text-gold' },
   win: { border: 'border-emerald-aug/30', bg: 'bg-emerald-aug/5', icon: CheckCircle, iconColor: 'text-emerald-aug' },
+  affiliate: { border: 'border-gold/40', bg: 'bg-gold/8', icon: Star, iconColor: 'text-gold' },
 }
 
 function Skeleton({ className = '' }: { className?: string }) {

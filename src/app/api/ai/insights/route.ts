@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server'
 import type { CFOContext, AIInsight } from '@/types'
 import { callHeavyAI } from '@/lib/ai-client'
 import { getUserPlan } from '@/lib/subscription'
+import { getEligibleAffiliates } from '@/lib/affiliates'
 
 function toMetric(label: string, value: string): string {
   return `${value} ${label}`.trim()
@@ -103,6 +104,8 @@ export async function POST(req: NextRequest) {
     availableBalance: Number(contextRaw.availableBalance ?? 0),
     runway: Number(contextRaw.runway ?? 0),
     cancelledSubscriptions30d: Number(contextRaw.cancelledSubscriptions30d ?? 0),
+    accountAgeDays: contextRaw.accountAgeDays != null ? Number(contextRaw.accountAgeDays) : undefined,
+    benchmarks: contextRaw.benchmarks,
   }
 
   try {
@@ -113,6 +116,17 @@ export async function POST(req: NextRequest) {
         provider: 'fallback',
         plan,
       })
+    }
+
+    let benchmarkBlock = ''
+    const isNew = (context.accountAgeDays ?? 365) < 60
+    if (isNew && context.benchmarks) {
+      const b = context.benchmarks
+      benchmarkBlock = `\n\nPEER BENCHMARKS (this is a NEW founder, Day ${context.accountAgeDays}):
+- Median MRR: $${b.medianMRR} | P25: $${b.p25MRR} | P75: $${b.p75MRR}
+- Median Growth: ${b.medianGrowthRate ?? 'N/A'}% MoM
+- Top Performer: $${b.topPerformerMRR}
+Replace the "opportunity" insight with a benchmark comparison for new founders.`
     }
 
     const prompt = `You are Lucrum's AI CFO engine. Analyze this founder's financial data and generate exactly 4 insights.
@@ -128,7 +142,7 @@ FINANCIAL DATA:
 - Available Cash: $${context.availableBalance}
 - Estimated Monthly Burn: (derived from payouts)
 - Runway: ${context.runway === 9999 ? 'Profitable / Infinite' : context.runway + ' days'}
-
+${benchmarkBlock}
 RULES:
 - Generate exactly 4 insights: 1 about cash/runway, 1 about churn/retention, 1 about growth, 1 opportunity
 - Each insight must be specific to the numbers above — no generic advice
@@ -154,12 +168,31 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
     const rawText = await callHeavyAI(undefined, prompt)
     const raw = rawText || '[]'
 
-    // Strip any accidental markdown fences
     const clean = raw.replace(/```json|```/g, '').trim()
     const insights: AIInsight[] = JSON.parse(clean)
-
-    // Sort by priority
     insights.sort((a, b) => a.priority - b.priority)
+
+    const affiliateMetrics = {
+      mrr: context.mrr,
+      runway: context.runway,
+      churnRate: context.churnRate,
+      accountAgeDays: context.accountAgeDays ?? 365,
+      revenue30d: context.revenue30d,
+    }
+    const eligible = getEligibleAffiliates(affiliateMetrics)
+    if (eligible.length > 0) {
+      const top = eligible[0]
+      insights.push({
+        id: `affiliate_${top.id}`,
+        type: 'affiliate',
+        title: top.tagline,
+        body: `${top.description} — recommended by MAX based on your financials.`,
+        action: top.ctaText,
+        affiliateUrl: top.affiliateUrl,
+        metric: top.name,
+        priority: 3,
+      })
+    }
 
     return NextResponse.json({ insights, provider: 'lucrum-ai', plan })
   } catch (error: any) {

@@ -42,6 +42,10 @@ export interface StripeMetrics {
   totalCustomers: number
   newCustomers30d: number
 
+  // Account age (for new-founder experience)
+  accountAgeDays: number
+  benchmarks?: BenchmarkReport
+
   // Cash
   availableBalance: number
   pendingBalance: number
@@ -114,7 +118,7 @@ export interface StripeEvent {
 
 // ─── AI ─────────────────────────────────────────────────────────────────────
 
-export type InsightSeverity = 'critical' | 'warning' | 'opportunity' | 'win'
+export type InsightSeverity = 'critical' | 'warning' | 'opportunity' | 'win' | 'affiliate'
 
 export interface AIInsight {
   id: string
@@ -122,6 +126,7 @@ export interface AIInsight {
   title: string
   body: string
   action: string
+  affiliateUrl?: string
   metric?: string   // e.g. "47 days"
   priority: 1 | 2 | 3  // 1 = highest
 }
@@ -138,6 +143,8 @@ export interface CFOContext {
   availableBalance: number
   runway: number
   cancelledSubscriptions30d: number
+  accountAgeDays?: number
+  benchmarks?: BenchmarkReport
 }
 
 // ─── API Responses ───────────────────────────────────────────────────────────
@@ -182,4 +189,76 @@ export interface SimulateResponse {
     monthly_growth_rate_pct: number
   }
   generated_at: string
+}
+
+// ─── Comp Benchmarks ────────────────────────────────────────────────────────
+
+export type CompSource = 'indiehackers' | 'twitter' | 'producthunt' | 'microacquire'
+export type CompCategory = 'SaaS' | 'API' | 'tool' | 'marketplace' | 'other'
+
+export interface CompDataPoint {
+  id: string
+  source: CompSource
+  mrr: number
+  monthsOld: number
+  category: CompCategory
+  churnRate?: number
+  growthRateMoM?: number
+  teamSize?: number
+  notes?: string
+  scrapedAt: number
+}
+
+export interface BenchmarkReport {
+  compCount: number
+  medianMRR: number
+  p25MRR: number
+  p75MRR: number
+  medianGrowthRate?: number
+  medianChurnRate?: number
+  topPerformerMRR: number
+  similarBusinesses: CompDataPoint[]
+  dataFreshness: number
+  sources: string[]
+}
+
+// ─── Action Engine ──────────────────────────────────────────────────────────
+
+export interface ActionCard {
+  id: string
+  priority: 1 | 2 | 3
+  severity: 'critical' | 'warning' | 'opportunity' | 'win'
+  title: string
+  context: string
+  estimatedImpact: string
+  actionType: string
+  actionLabel: string
+  params: Record<string, any>
+  isDestructive: boolean
+  requiresConfirmText: boolean
+  affectedCustomerCount?: number
+}
+
+// ─── Affiliates ─────────────────────────────────────────────────────────────
+
+export interface AffiliateProduct {
+  id: string
+  name: string
+  category: 'financing' | 'credit' | 'accounting' | 'saas_lending'
+  tagline: string
+  description: string
+  ctaText: string
+  affiliateUrl: string
+  affiliateCode?: string
+  triggerConditions: {
+    minMRR?: number
+    maxMRR?: number
+    minRunway?: number
+    maxRunway?: number
+    minChurn?: number
+    accountAgeDays?: number
+    requiresRevenue?: boolean
+  }
+  maxRecommendationContext: string
+  priority: number
 }

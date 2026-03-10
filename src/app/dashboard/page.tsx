@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react'
 import {
   TrendingUp, TrendingDown, DollarSign, Users, Zap,
   Brain, AlertTriangle, CheckCircle, ArrowUpRight,
-  ChevronRight,
+  ChevronRight, ExternalLink, Star,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -17,7 +17,10 @@ import { formatCurrency, formatPercent, timeAgo } from '@/lib/utils'
 import DashboardShell from '@/components/DashboardShell'
 import InlineNotice from '@/components/InlineNotice'
 import MRRHistory from '@/components/MRRHistory'
-import type { InsightSeverity } from '@/types'
+import BenchmarkPanel from '@/components/BenchmarkPanel'
+import MaxRecommendations from '@/components/MaxRecommendations'
+import ActionModal from '@/components/ActionModal'
+import type { InsightSeverity, ActionCard } from '@/types'
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -28,6 +31,46 @@ const INSIGHT_STYLES: Record<InsightSeverity, {
   warning:     { border: 'border-yellow-500/35',   bg: 'bg-yellow-500/6',   icon: AlertTriangle, iconColor: 'text-yellow-400', dot: 'bg-yellow-400' },
   opportunity: { border: 'border-gold/30',         bg: 'bg-gold/5',         icon: TrendingUp,    iconColor: 'text-gold',       dot: 'bg-gold' },
   win:         { border: 'border-emerald-aug/30',  bg: 'bg-emerald-aug/5',  icon: CheckCircle,   iconColor: 'text-emerald-aug',dot: 'bg-emerald-aug' },
+  affiliate:   { border: 'border-gold/40',         bg: 'bg-gold/8',         icon: Star,          iconColor: 'text-gold',       dot: 'bg-gold' },
+}
+
+function parseActionBlocks(text: string): { cleanText: string; actions: ActionCard[]; affiliates: Array<{ productId: string; name: string; cta: string; url: string }> } {
+  const actions: ActionCard[] = []
+  const affiliates: Array<{ productId: string; name: string; cta: string; url: string }> = []
+  let cleanText = text
+
+  const actionRegex = /```action\s*\n?([\s\S]*?)```/g
+  let match
+  while ((match = actionRegex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim())
+      actions.push({
+        id: `chat_${parsed.actionType}_${Date.now()}`,
+        priority: 1,
+        severity: 'opportunity',
+        title: parsed.title || parsed.actionType,
+        context: 'Recommended by MAX in chat',
+        estimatedImpact: 'See preview',
+        actionType: parsed.actionType,
+        actionLabel: 'Execute',
+        params: parsed.params || {},
+        isDestructive: ['cancel_subscription', 'update_price'].includes(parsed.actionType),
+        requiresConfirmText: ['cancel_subscription', 'update_price'].includes(parsed.actionType),
+      })
+    } catch { /* skip malformed */ }
+    cleanText = cleanText.replace(match[0], '')
+  }
+
+  const affiliateRegex = /```affiliate\s*\n?([\s\S]*?)```/g
+  while ((match = affiliateRegex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim())
+      affiliates.push(parsed)
+    } catch { /* skip */ }
+    cleanText = cleanText.replace(match[0], '')
+  }
+
+  return { cleanText: cleanText.trim(), actions, affiliates }
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
@@ -90,6 +133,8 @@ export default function DashboardPage() {
   const [aiProvider, setAiProvider] = useState<'groq' | 'gemini' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [billingBusy, setBillingBusy] = useState(false)
+  const [billingError, setBillingError] = useState<string | null>(null)
+  const [chatActionCard, setChatActionCard] = useState<ActionCard | null>(null)
 
   const askAI = useCallback(async (question: string) => {
     if (!question.trim()) return
@@ -114,6 +159,8 @@ export default function DashboardPage() {
             availableBalance: metrics.availableBalance,
             runway: metrics.runway,
             cancelledSubscriptions30d: metrics.cancelledSubscriptions30d,
+            accountAgeDays: metrics.accountAgeDays,
+            benchmarks: metrics.benchmarks,
           } : undefined,
         }),
       })
@@ -137,6 +184,7 @@ export default function DashboardPage() {
 
   const startCheckout = useCallback(async (interval: 'monthly' | 'annual' = 'monthly') => {
     setBillingBusy(true)
+    setBillingError(null)
     try {
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
@@ -144,9 +192,15 @@ export default function DashboardPage() {
         body: JSON.stringify({ interval }),
       })
       const data = await res.json()
+      if (!res.ok) {
+        setBillingError(data?.error || 'Billing is not configured yet.')
+        return
+      }
       if (data?.url) {
         window.location.href = data.url
+        return
       }
+      setBillingError('Billing is not configured yet.')
     } finally {
       setBillingBusy(false)
     }
@@ -170,6 +224,11 @@ export default function DashboardPage() {
               <p className="text-sm text-white">
                 Free plan keeps the dashboard. Pro unlocks the full AI CFO, deeper insights, and the action engine.
               </p>
+              {billingError && (
+                <p className="mt-2 text-xs font-mono text-crimson-aug">
+                  {billingError}
+                </p>
+              )}
             </div>
             <div className="flex gap-3">
               <button
@@ -187,6 +246,20 @@ export default function DashboardPage() {
                 Annual $899
               </button>
             </div>
+          </div>
+        )}
+
+        {/* MAX Recommendations */}
+        <MaxRecommendations metrics={metrics} />
+
+        {/* Benchmark Panel for new founders */}
+        {metrics && metrics.accountAgeDays < 60 && metrics.benchmarks && (
+          <div className="mb-6">
+            <BenchmarkPanel
+              benchmarks={metrics.benchmarks}
+              accountAgeDays={metrics.accountAgeDays}
+              currentMRR={metrics.mrr}
+            />
           </div>
         )}
 
@@ -353,14 +426,20 @@ export default function DashboardPage() {
                 ))
               ) : insights.length > 0 ? (
                 insights.map((insight) => {
-                  const style = INSIGHT_STYLES[insight.type]
+                  const style = INSIGHT_STYLES[insight.type] ?? INSIGHT_STYLES.opportunity
                   const Icon  = style.icon
+                  const isAffiliate = insight.type === 'affiliate'
                   return (
                     <div key={insight.id} className={`rounded-xl p-4 border ${style.border} ${style.bg} flex items-start gap-3`}>
                       <Icon className={`w-4 h-4 flex-shrink-0 mt-0.5 ${style.iconColor}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
                           <p className="text-sm font-semibold text-white">{insight.title}</p>
+                          {isAffiliate && (
+                            <span className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-gold/20 text-gold border border-gold/30">
+                              Partner
+                            </span>
+                          )}
                           {insight.metric && (
                             <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${style.bg} border ${style.border} ${style.iconColor}`}>
                               {insight.metric}
@@ -369,9 +448,27 @@ export default function DashboardPage() {
                         </div>
                         <p className="text-xs text-slate-aug leading-relaxed">{insight.body}</p>
                       </div>
-                      <button className="text-xs text-slate-aug hover:text-white flex items-center gap-0.5 flex-shrink-0 transition-colors">
-                        {insight.action}<ChevronRight className="w-3 h-3" />
-                      </button>
+                      {isAffiliate && insight.affiliateUrl ? (
+                        <a
+                          href={`/api/affiliates/redirect?product=${insight.id.replace('affiliate_', '')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => {
+                            fetch('/api/affiliates/click', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ productId: insight.id.replace('affiliate_', '') }),
+                            }).catch(() => {})
+                          }}
+                          className="text-xs text-gold hover:text-gold-light flex items-center gap-0.5 flex-shrink-0 transition-colors"
+                        >
+                          {insight.action}<ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <button className="text-xs text-slate-aug hover:text-white flex items-center gap-0.5 flex-shrink-0 transition-colors">
+                          {insight.action}<ChevronRight className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   )
                 })
@@ -407,16 +504,64 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {aiResponse && (
-                <div className="mt-3 p-4 rounded-xl bg-gold/5 border border-gold/20 fade-up">
-                  <p className="text-sm text-white leading-relaxed">{aiResponse}</p>
-                  {aiProvider && (
-                    <p className="text-[11px] font-mono uppercase tracking-widest text-slate-aug mt-2">
-                      Source: {aiProvider}
-                    </p>
-                  )}
-                </div>
-              )}
+              {aiResponse && (() => {
+                const { cleanText, actions: chatActions, affiliates: chatAffiliates } = parseActionBlocks(aiResponse)
+                return (
+                  <div className="mt-3 space-y-3 fade-up">
+                    <div className="p-4 rounded-xl bg-gold/5 border border-gold/20">
+                      <p className="text-sm text-white leading-relaxed">{cleanText}</p>
+                      {aiProvider && (
+                        <p className="text-[11px] font-mono uppercase tracking-widest text-slate-aug mt-2">
+                          Source: {aiProvider}
+                        </p>
+                      )}
+                    </div>
+
+                    {chatActions.map((action) => (
+                      <div key={action.id} className="p-3 rounded-xl border border-gold/30 bg-gold/5 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{action.title}</p>
+                          <p className="text-xs text-slate-aug">Action: {action.actionType.replace(/_/g, ' ')}</p>
+                        </div>
+                        <button
+                          onClick={() => setChatActionCard(action)}
+                          className="px-3 py-1.5 rounded-lg bg-gold text-obsidian text-xs font-bold hover:bg-gold-light transition-all"
+                        >
+                          Execute
+                        </button>
+                      </div>
+                    ))}
+
+                    {chatAffiliates.map((aff) => (
+                      <a
+                        key={aff.productId}
+                        href={`/api/affiliates/redirect?product=${aff.productId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => {
+                          fetch('/api/affiliates/click', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ productId: aff.productId }),
+                          }).catch(() => {})
+                        }}
+                        className="p-3 rounded-xl border border-gold/30 bg-gold/5 flex items-center justify-between hover:bg-gold/10 transition-all"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Star className="w-4 h-4 text-gold" />
+                          <div>
+                            <p className="text-sm font-semibold text-white">{aff.name}</p>
+                            <span className="text-[10px] font-mono uppercase tracking-widest text-gold/60">Partner</span>
+                          </div>
+                        </div>
+                        <span className="flex items-center gap-1 text-xs text-gold">
+                          {aff.cta} <ExternalLink className="w-3 h-3" />
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                )
+              })()}
 
               <div className="flex flex-wrap gap-2 mt-3">
                 {[
@@ -502,6 +647,10 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
+        )}
+
+        {chatActionCard && (
+          <ActionModal card={chatActionCard} onClose={() => setChatActionCard(null)} />
         )}
     </DashboardShell>
   )

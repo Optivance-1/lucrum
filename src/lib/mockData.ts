@@ -200,6 +200,7 @@ export function createMockStripeMetrics(): StripeMetrics {
     revenueByPeriod: buildRevenueByPeriod(),
     recentEvents: buildRecentEvents(now),
     leakageSummary,
+    accountAgeDays: 120,
     currency: 'USD',
     fetchedAt: now,
   }

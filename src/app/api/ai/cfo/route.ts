@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server'
 import type { CFOContext } from '@/types'
 import { callChatAI } from '@/lib/ai-client'
 import { getUserPlan } from '@/lib/subscription'
+import { getEligibleAffiliates } from '@/lib/affiliates'
 
 function fmtNumber(value: number | undefined, suffix = ''): string {
   if (value == null || Number.isNaN(value)) return 'unknown'
@@ -77,6 +78,37 @@ export async function POST(req: NextRequest) {
       })
     }
 
+    let benchmarkSection = ''
+    if (ctx.accountAgeDays != null && ctx.accountAgeDays < 60 && ctx.benchmarks) {
+      const b = ctx.benchmarks
+      benchmarkSection = `\n\nPEER BENCHMARKS (for companies at similar age):
+- Median MRR: $${b.medianMRR} | P25: $${b.p25MRR} | P75: $${b.p75MRR}
+- Median Growth: ${b.medianGrowthRate ?? 'N/A'}% MoM
+- Median Churn: ${b.medianChurnRate ?? 'N/A'}%
+- Top Performer MRR: $${b.topPerformerMRR}
+- Data from ${b.compCount} similar companies
+Use these benchmarks to contextualize advice for this NEW founder (Day ${ctx.accountAgeDays}).`
+    }
+
+    const affiliateMetrics = {
+      mrr: ctx.mrr ?? 0,
+      runway: ctx.runway ?? 365,
+      churnRate: ctx.churnRate ?? 0,
+      accountAgeDays: ctx.accountAgeDays ?? 365,
+      revenue30d: ctx.revenue30d ?? 0,
+    }
+    const eligibleAffiliates = getEligibleAffiliates(affiliateMetrics)
+    let affiliateSection = ''
+    if (eligibleAffiliates.length > 0) {
+      const list = eligibleAffiliates.map(a => `- ${a.name}: ${a.maxRecommendationContext}`).join('\n')
+      affiliateSection = `\n\nRELEVANT FINANCIAL PRODUCTS (mention at most 1 if naturally relevant):
+${list}
+If you mention a product, include an action block:
+\`\`\`affiliate
+{"productId":"${eligibleAffiliates[0].id}","name":"${eligibleAffiliates[0].name}","cta":"${eligibleAffiliates[0].ctaText}","url":"${eligibleAffiliates[0].affiliateUrl}"}
+\`\`\``
+    }
+
     const system = `You are Lucrum's AI CFO — a sharp, direct financial advisor for indie hackers, micro-SaaS founders, and AI builders.
 
 You speak like a brilliant CFO who's also been a founder — blunt, practical, data-driven, zero fluff. Give specific, actionable advice. Never hedge excessively. Always use the real numbers when available.
@@ -92,13 +124,20 @@ LIVE FINANCIAL DATA FOR THIS BUSINESS:
 - Available Cash: $${ctx.availableBalance ?? 'unknown'}
 - Cash Runway: ${ctx.runway === 9999 ? 'Profitable / infinite' : (ctx.runway ?? 'unknown') + ' days'}
 - Cancelled Subs (30d): ${ctx.cancelledSubscriptions30d ?? 'unknown'}
-
+${benchmarkSection}
 RESPONSE RULES:
 1. Under 130 words unless a breakdown is genuinely required
 2. Reference the actual numbers above when they're relevant
 3. Sound like a human texting, not a report generator
 4. If data is missing, say exactly what you'd need to answer better
-5. Never start with "Great question" or any fluff opener`
+5. Never start with "Great question" or any fluff opener
+
+ACTION EXECUTION:
+When you recommend a specific Stripe action the user can take, include an action block:
+\`\`\`action
+{"actionType":"retry_payment|send_email|apply_coupon|pause_subscription|cancel_subscription|create_coupon|trigger_payout|update_price","title":"Short action title","params":{}}
+\`\`\`
+Only include action blocks for concrete, executable actions. Max 1 per response.${affiliateSection}`
 
     const answer = await callChatAI(system, question)
 

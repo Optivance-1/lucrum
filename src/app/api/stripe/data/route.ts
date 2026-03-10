@@ -9,6 +9,7 @@ import {
   rememberStripeCustomerOwner,
   rememberStripeSubscriptionOwner,
 } from '@/lib/user-state'
+import { isNewFounder, benchmarksForMetrics } from '@/lib/comp-engine'
 import type { StripeMetrics, DailyRevenue, StripeEvent, CashFlowPeriod, CohortRetentionRow, RevenueByPeriod, LeakageSummary } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -324,6 +325,11 @@ export async function GET(req: NextRequest) {
       passiveChurnAtRisk: Math.round(failedPaymentsValue),
     }
 
+    const accountCreatedAt = (account as any).created as number | undefined
+    const accountAgeDays = accountCreatedAt
+      ? Math.max(0, Math.floor((now - accountCreatedAt) / 86400))
+      : 365
+
     const metrics: StripeMetrics = {
       mrr: Math.round(mrr),
       mrrPrevious: Math.round(mrrPrevious),
@@ -363,8 +369,18 @@ export async function GET(req: NextRequest) {
       revenueByPeriod,
       recentEvents: recentEvents.slice(0, 20),
       leakageSummary,
+      accountAgeDays,
       currency: balance.available[0]?.currency?.toUpperCase() ?? 'USD',
       fetchedAt: now,
+    }
+
+    if (isNewFounder(accountAgeDays)) {
+      try {
+        const benchmarks = await benchmarksForMetrics(metrics)
+        if (benchmarks) metrics.benchmarks = benchmarks
+      } catch {
+        // Benchmarks are best-effort
+      }
     }
 
     await Promise.all([

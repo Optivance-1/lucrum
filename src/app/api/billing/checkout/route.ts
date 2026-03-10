@@ -21,10 +21,13 @@ export async function POST(req: NextRequest) {
       : process.env.LUCRUM_PRO_PRICE_ID
 
     if (!priceId) {
-      return NextResponse.json({ error: 'Missing Lucrum price configuration' }, { status: 500 })
+      return NextResponse.json({ error: 'Billing not configured' }, { status: 503 })
     }
 
     const stripe = getLucrumStripe()
+    if (!stripe) {
+      return NextResponse.json({ error: 'Billing not configured' }, { status: 503 })
+    }
     const user = await currentUser()
     const email = user?.primaryEmailAddress?.emailAddress ?? null
 
