@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe'
 import type Stripe from 'stripe'
+import { callHeavyAI } from '@/lib/ai-client'
+import { writeAuditEntry } from '@/lib/audit-log'
+import { sendEmailToUserId } from '@/lib/email'
+import {
+  markCustomerAtRisk,
+  markMetricsInvalidated,
+  resolveUserIdFromStripeEventObject,
+} from '@/lib/user-state'
+
+function formatCurrency(amount = 0, currency = 'usd'): string {
+  return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`
+}
+
+async function buildAnalysis(prompt: string): Promise<string> {
+  const text = await callHeavyAI(
+    'You are MAX, Lucrum\'s revenue operator. Be concrete, concise, and action-oriented.',
+    prompt
+  )
+
+  return text || 'MAX could not generate a tailored analysis right now. Reach out to the customer immediately and review recent payment or subscription changes.'
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.text()
@@ -24,56 +45,132 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const object = event.data.object as Record<string, any>
+    const userId = await resolveUserIdFromStripeEventObject(object, event.account ?? null)
+
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const pi = event.data.object as Stripe.PaymentIntent
-        console.log(`[webhook] 💰 Payment succeeded: $${pi.amount / 100} ${pi.currency.toUpperCase()}`)
-        // Phase 2: store in DB, invalidate metrics cache, push real-time update
+        if (userId) {
+          await markMetricsInvalidated(userId)
+          await writeAuditEntry({
+            userId,
+            actionType: 'stripe.payment_intent.succeeded',
+            category: 'stripe',
+            params: { paymentIntentId: pi.id, customerId: pi.customer },
+            result: { amount: pi.amount, currency: pi.currency, status: pi.status },
+            success: true,
+            affectedCustomers: typeof pi.customer === 'string' ? [pi.customer] : [],
+            maxRecommended: false,
+            executedAt: new Date().toISOString(),
+          })
+        }
         break
       }
 
       case 'charge.succeeded': {
-        const charge = event.data.object as Stripe.Charge
-        console.log(`[webhook] ✅ Charge succeeded: $${charge.amount / 100}`)
         break
       }
 
       case 'charge.refunded': {
-        const charge = event.data.object as Stripe.Charge
-        console.log(`[webhook] 🔄 Charge refunded: $${(charge.amount_refunded ?? 0) / 100}`)
         break
       }
 
       case 'customer.subscription.created': {
         const sub = event.data.object as Stripe.Subscription
-        console.log(`[webhook] 🎉 New subscription: ${sub.id}`)
-        // Phase 2: trigger AI insight regeneration
+        if (userId) {
+          const analysis = await buildAnalysis(
+            `A new subscription was created.\nSubscription ID: ${sub.id}\nCustomer: ${String(sub.customer)}\nStatus: ${sub.status}\nCreate a short fit analysis and one onboarding action.`
+          )
+          await sendEmailToUserId(
+            userId,
+            'New subscriber: here is what MAX sees',
+            analysis
+          )
+          await writeAuditEntry({
+            userId,
+            actionType: 'stripe.customer.subscription.created',
+            category: 'stripe',
+            params: { subscriptionId: sub.id, customerId: sub.customer },
+            result: { analysis },
+            success: true,
+            affectedCustomers: typeof sub.customer === 'string' ? [sub.customer] : [],
+            maxRecommended: true,
+            executedAt: new Date().toISOString(),
+          })
+        }
         break
       }
 
       case 'customer.subscription.updated': {
-        const sub = event.data.object as Stripe.Subscription
-        console.log(`[webhook] 📝 Subscription updated: ${sub.id} → ${sub.status}`)
         break
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription
-        console.log(`[webhook] ❌ Subscription cancelled: ${sub.id}`)
-        // Phase 2: log churn event, update metrics, trigger churn alert
+        if (userId) {
+          const analysis = await buildAnalysis(
+            `A subscriber churned.\nSubscription ID: ${sub.id}\nCustomer: ${String(sub.customer)}\nStatus: ${sub.status}\nWrite a personalized churn analysis and the single best recovery action.`
+          )
+          await sendEmailToUserId(
+            userId,
+            'You just lost a subscriber',
+            analysis
+          )
+          await writeAuditEntry({
+            userId,
+            actionType: 'stripe.customer.subscription.deleted',
+            category: 'stripe',
+            params: { subscriptionId: sub.id, customerId: sub.customer },
+            result: { analysis },
+            success: true,
+            affectedCustomers: typeof sub.customer === 'string' ? [sub.customer] : [],
+            maxRecommended: true,
+            executedAt: new Date().toISOString(),
+          })
+        }
         break
       }
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice
-        console.log(`[webhook] ⚠️ Payment failed for invoice: ${invoice.id}`)
-        // Phase 2: flag customer as at-risk, trigger dunning flow
+        const customerId = typeof invoice.customer === 'string' ? invoice.customer : ''
+        const analysis = await buildAnalysis(
+          `A payment failed.\nInvoice ID: ${invoice.id}\nCustomer: ${customerId}\nAmount due: ${formatCurrency(invoice.amount_due ?? 0, invoice.currency ?? 'usd')}\nWrite the best recovery message to send right now.`
+        )
+
+        if (customerId) {
+          await markCustomerAtRisk({
+            customerId,
+            invoiceId: invoice.id,
+            amountDue: invoice.amount_due ?? 0,
+            customerName: invoice.customer_name ?? null,
+            updatedAt: new Date().toISOString(),
+          })
+        }
+
+        if (userId) {
+          await sendEmailToUserId(
+            userId,
+            'Failed payment: action needed',
+            `Customer: ${invoice.customer_name || customerId || 'Unknown'}\nAmount due: ${formatCurrency(invoice.amount_due ?? 0, invoice.currency ?? 'usd')}\n\n${analysis}`
+          )
+          await writeAuditEntry({
+            userId,
+            actionType: 'stripe.invoice.payment_failed',
+            category: 'stripe',
+            params: { invoiceId: invoice.id, customerId },
+            result: { analysis, amountDue: invoice.amount_due ?? 0 },
+            success: true,
+            affectedCustomers: customerId ? [customerId] : [],
+            maxRecommended: true,
+            executedAt: new Date().toISOString(),
+          })
+        }
         break
       }
 
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice
-        console.log(`[webhook] ✅ Invoice paid: $${(invoice.amount_paid ?? 0) / 100}`)
         break
       }
 

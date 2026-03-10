@@ -1,16 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/nextjs'
 import { ArrowLeft, Lock, Zap, Shield, CheckCircle, AlertCircle } from 'lucide-react'
 
 export default function ConnectPage() {
+  const router = useRouter()
+  const { isLoaded, userId } = useAuth()
   const [status, setStatus] = useState<'idle' | 'connecting' | 'success' | 'error'>('idle')
   const [stripeKey, setStripeKey] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      router.replace('/sign-up')
+    }
+  }, [isLoaded, router, userId])
+
   const handleConnect = async () => {
     if (!stripeKey.trim()) return
+    if (!userId) {
+      router.replace('/sign-up')
+      return
+    }
     setStatus('connecting')
     setErrorMessage('')
     
@@ -25,7 +39,7 @@ export default function ConnectPage() {
       if (data.success) {
         setStatus('success')
         setTimeout(() => {
-          window.location.href = '/dashboard'
+          router.replace('/dashboard')
         }, 1500)
       } else {
         setStatus('error')
@@ -35,6 +49,18 @@ export default function ConnectPage() {
       setStatus('error')
       setErrorMessage('Connection failed. Please try again.')
     }
+  }
+
+  if (!isLoaded || !userId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="glass gold-border rounded-2xl p-8 text-center max-w-md w-full">
+          <p className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-3">Preparing account</p>
+          <h1 className="font-display text-2xl font-bold text-white mb-2">Redirecting to sign up</h1>
+          <p className="text-slate-aug text-sm">You need an account before connecting Stripe.</p>
+        </div>
+      </div>
+    )
   }
 
   return (

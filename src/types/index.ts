@@ -171,7 +171,7 @@ export interface SimulateResponse {
   confidence: number
   advice: string
   advice_confidence: number
-  advice_source: 'gemini' | 'anthropic' | 'fallback'
+  advice_source: 'groq' | 'gemini' | 'fallback'
   baseline: {
     current_mrr: number
     available_cash: number

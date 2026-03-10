@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
 import type { CFOContext } from '@/types'
 import { callChatAI } from '@/lib/ai-client'
+import { getUserPlan } from '@/lib/subscription'
 
 function fmtNumber(value: number | undefined, suffix = ''): string {
   if (value == null || Number.isNaN(value)) return 'unknown'
@@ -41,7 +43,17 @@ function buildFallbackAnswer(question: string, ctx: Partial<CFOContext>): string
   return `Current snapshot: MRR $${fmtNumber(mrr)}, 30-day revenue $${fmtNumber(revenue)}, runway ${fmtNumber(runway, ' days')}. Pick one lever this week: cut low-ROI spend, improve retention, or test pricing on new users only.`
 }
 
+function buildFreePlanAnswer(question: string, ctx: Partial<CFOContext>): string {
+  const prompt = question.trim() ? `You asked: "${question.trim()}". ` : ''
+  return `${prompt}Free plan gives you the dashboard and limited guidance only. You currently have MRR $${fmtNumber(ctx.mrr)} and churn ${fmtNumber(ctx.churnRate, '%')}. Upgrade to Pro to unlock full MAX CFO answers, deeper retention analysis, and action-ready recommendations.`
+}
+
 export async function POST(req: NextRequest) {
+  const { userId } = await auth()
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const payload = await req.json().catch(() => ({})) as {
     question?: string
     context?: Partial<CFOContext>
@@ -55,6 +67,15 @@ export async function POST(req: NextRequest) {
     }
 
     const ctx = context ?? {}
+    const plan = await getUserPlan(userId)
+
+    if (plan === 'free') {
+      return NextResponse.json({
+        answer: buildFreePlanAnswer(question, ctx),
+        provider: 'fallback',
+        plan,
+      })
+    }
 
     const system = `You are Lucrum's AI CFO — a sharp, direct financial advisor for indie hackers, micro-SaaS founders, and AI builders.
 
@@ -81,7 +102,7 @@ RESPONSE RULES:
 
     const answer = await callChatAI(system, question)
 
-    return NextResponse.json({ answer, provider: 'lucrum-ai' })
+    return NextResponse.json({ answer, provider: 'lucrum-ai', plan })
   } catch (error: any) {
     console.error('[ai/cfo] error:', error)
     return NextResponse.json({

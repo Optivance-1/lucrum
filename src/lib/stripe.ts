@@ -75,6 +75,7 @@ export function decryptStripeKey(ciphertext: string): string | null {
 
 type StripeAccountsPayload = {
   v: 1
+  userId: string | null
   activeId: string | null
   accounts: { id: string; label: string; secretKey: string }[]
 }
@@ -85,7 +86,12 @@ export function parseStripeAccountsCookie(raw: string): StripeAccountsPayload | 
   try {
     const parsed = JSON.parse(maybeDecrypted)
     if (parsed?.v !== 1 || !Array.isArray(parsed.accounts)) return null
-    return parsed as StripeAccountsPayload
+    return {
+      v: 1,
+      userId: typeof parsed.userId === 'string' ? parsed.userId : null,
+      activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null,
+      accounts: parsed.accounts,
+    }
   } catch {
     return null
   }
@@ -101,12 +107,16 @@ export function serializeStripeAccountsCookie(payload: StripeAccountsPayload): s
 
 // Get Stripe key from request cookies (encrypted in production).
 export function getStripeKeyFromCookies(
-  cookies: { get: (name: string) => { value: string } | undefined }
+  cookies: { get: (name: string) => { value: string } | undefined },
+  userId?: string | null
 ): string | null {
   const accountsRaw = cookies.get(STRIPE_ACCOUNTS_COOKIE)?.value
   if (accountsRaw) {
     const payload = parseStripeAccountsCookie(accountsRaw)
     if (payload?.accounts?.length) {
+      if (userId && payload.userId && payload.userId !== userId) {
+        return null
+      }
       const active = payload.activeId
         ? payload.accounts.find(a => a.id === payload.activeId)
         : payload.accounts[0]
@@ -116,6 +126,10 @@ export function getStripeKeyFromCookies(
 
   const raw = cookies.get(STRIPE_KEY_COOKIE)?.value
   if (!raw) return null
+
+  if (userId && process.env.NODE_ENV === 'production') {
+    return null
+  }
 
   if (raw.startsWith(`${ENCRYPTION_PREFIX}.`)) {
     return decryptStripeKey(raw)

@@ -1,17 +1,25 @@
-import { authMiddleware } from '@clerk/nextjs'
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
-export default authMiddleware({
-  publicRoutes: [
-    '/',
-    '/api/stripe/webhook',
-    '/api/health',
-  ],
+const isPublicRoute = createRouteMatcher([
+  '/',
+  '/connect',
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+  '/api/stripe/webhook',
+  '/api/billing/webhook',
+  '/api/health',
+])
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect()
+  }
 })
 
 export const config = {
   matcher: [
-    // Protect all application routes and APIs except for static assets and the public routes above.
-    '/((?!(?:_next/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$)).*)',
+    // Run middleware for all app routes and APIs except for static assets.
+    '/((?!.+\\.[\\w]+$|_next).*)',
     '/api/(.*)',
   ],
 }

@@ -45,7 +45,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Real churn rate** — cancelled subs / active subs at period start
 - **Actual cash runway** — balance vs real monthly burn
 - **AI-generated insights** — dynamic, based on your real numbers
-- **Conversational AI CFO** — powered by Claude, with your real metrics as context
+-- **Conversational AI CFO** — powered by Groq, with your real metrics as context
 
 ## Tech Stack
 
@@ -53,7 +53,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Styling**: Tailwind CSS + custom design system
 - **Charts**: Recharts
 - **Payments Data**: Stripe API v2023-10-16
-- **AI Engine**: Anthropic Claude (claude-sonnet-4-20250514)
+- **AI Engine**: Groq (primary) with Gemini 1.5 fallback
 - **Language**: TypeScript
 
 ## Getting Started
@@ -73,7 +73,11 @@ Fill in your keys:
 STRIPE_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-ANTHROPIC_API_KEY=sk-ant-...
+AI_PROVIDER=groq
+GROQ_API_KEY=sk_groq_...
+GROQ_MODEL=llama-3.3-70b-versatile
+GEMINI_API_KEY=your_gemini_key   # optional fallback
+GEMINI_MODEL=gemini-1.5-flash
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 COOKIE_ENCRYPTION_KEY=replace_with_a_long_random_secret
 ```
@@ -194,8 +198,7 @@ Before full production:
     "framer-motion": "^11.3.0",
     "lucide-react": "^0.400.0",
     "clsx": "^2.1.1",
-    "date-fns": "^3.6.0",
-    "@anthropic-ai/sdk": "^0.66.0"
+    "date-fns": "^3.6.0"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -1067,12 +1070,18 @@ export default function ConnectPage() {
 ## FILE: src/app/dashboard/layout.tsx
 
 ```tsx
+import { StripeDataProvider } from '@/contexts/StripeDataContext'
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return <div className="min-h-screen bg-obsidian">{children}</div>
+  return (
+    <div className="min-h-screen bg-obsidian">
+      <StripeDataProvider>{children}</StripeDataProvider>
+    </div>
+  )
 }
 
 ```
@@ -1086,12 +1095,10 @@ export default function DashboardLayout({
 
 import Link from 'next/link'
 import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import {
   TrendingUp, TrendingDown, DollarSign, Users, Zap,
   Brain, AlertTriangle, CheckCircle, ArrowUpRight,
-  BarChart2, Settings, LogOut, RefreshCw, Wifi, WifiOff,
-  ChevronRight, Clock,
+  ChevronRight,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -1099,7 +1106,9 @@ import {
 } from 'recharts'
 import { useStripeData } from '@/hooks/useStripeData'
 import { formatCurrency, formatPercent, timeAgo } from '@/lib/utils'
-import type { AIInsight, InsightSeverity } from '@/types'
+import DashboardShell from '@/components/DashboardShell'
+import InlineNotice from '@/components/InlineNotice'
+import type { InsightSeverity } from '@/types'
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -1165,28 +1174,11 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 // ─── Main dashboard ─────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const router = useRouter()
-  const { metrics, insights, loading, insightsLoading, error, lastRefreshed, refresh } = useStripeData()
-  const [refreshing, setRefreshing] = useState(false)
-
-  // AI CFO chat state
+  const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
+  const [aiProvider, setAiProvider] = useState<'groq' | 'gemini' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await refresh()
-    setRefreshing(false)
-  }
-
-  const handleDisconnect = useCallback(async () => {
-    try {
-      await fetch('/api/stripe/disconnect', { method: 'POST' })
-    } finally {
-      router.push('/')
-    }
-  }, [router])
 
   const askAI = useCallback(async (question: string) => {
     if (!question.trim()) return
@@ -1215,9 +1207,11 @@ export default function DashboardPage() {
         }),
       })
       const data = await res.json()
-      setAiResponse(data.answer ?? 'Could not get a response. Check your Anthropic API key.')
+      setAiProvider(data.provider ?? 'fallback')
+      setAiResponse(data.answer ?? 'Could not get a response right now.')
     } catch {
-      setAiResponse('Connection to AI CFO failed. Please check your ANTHROPIC_API_KEY.')
+      setAiProvider('fallback')
+      setAiResponse('AI advisor is running in local fallback mode right now. Try again in a few seconds.')
     } finally {
       setAiLoading(false)
     }
@@ -1231,113 +1225,30 @@ export default function DashboardPage() {
   const runwayPositive = !metrics ? true : metrics.runway > 90 || metrics.runway >= 9999
 
   return (
-    <div className="min-h-screen flex">
-
-      {/* Sidebar */}
-      <aside className="w-64 glass-strong border-r border-[rgba(201,168,76,0.1)] flex flex-col fixed h-full left-0 top-0 z-40">
-        <div className="p-6 border-b border-[rgba(201,168,76,0.1)]">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-gold to-gold-dark flex items-center justify-center">
-              <span className="text-obsidian font-display font-bold">L</span>
-            </div>
-            <span className="font-display font-bold text-lg text-gradient-gold">Lucrum</span>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-1">
-          {[
-            { icon: BarChart2, label: 'Overview',    href: '/dashboard',            active: true  },
-            { icon: DollarSign, label: 'Revenue',    href: '/dashboard/revenue',    active: false },
-            { icon: Users,      label: 'Customers',  href: '/dashboard/customers',  active: false },
-            { icon: TrendingUp, label: 'Forecasts',  href: '/dashboard/forecasts',  active: false },
-            { icon: Brain,      label: 'AI Insights',href: '/dashboard/insights',   active: false },
-          ].map(({ icon: Icon, label, href, active }) => (
-            <Link key={label} href={href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${
-                active
-                  ? 'bg-gold/10 text-gold border border-gold/20'
-                  : 'text-slate-aug hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </Link>
-          ))}
-        </nav>
-
-        {/* Connection status */}
-        <div className="px-4 py-3 mx-4 mb-2 rounded-xl border border-[rgba(201,168,76,0.1)] bg-white/2">
-          <div className="flex items-center gap-2">
-            {error
-              ? <WifiOff className="w-3 h-3 text-crimson-aug" />
-              : <Wifi className="w-3 h-3 text-emerald-aug" />
-            }
-            <span className="text-xs font-mono text-slate-aug">
-              {error ? 'Disconnected' : 'Stripe connected'}
-            </span>
-          </div>
-          {lastRefreshed && !error && (
-            <p className="text-xs text-slate-aug/50 font-mono mt-1 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {timeAgo(Math.floor(lastRefreshed.getTime() / 1000))}
-            </p>
-          )}
-        </div>
-
-        <div className="p-4 border-t border-[rgba(201,168,76,0.1)] space-y-1">
-          <Link href="/connect" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-aug hover:text-white hover:bg-white/5 transition-all">
-            <Settings className="w-4 h-4" />Settings
-          </Link>
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-aug hover:text-white hover:bg-white/5 transition-all"
-          >
-            <LogOut className="w-4 h-4" />Disconnect
-          </button>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="ml-64 flex-1 p-8 min-h-screen">
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-white">
-              {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}. ☀️
-            </h1>
-            <p className="text-slate-aug text-sm mt-1">
-              {error
-                ? <span className="text-crimson-aug">⚠ {error}</span>
-                : loading
-                ? 'Loading your financial data...'
-                : `Last synced ${lastRefreshed ? timeAgo(Math.floor(lastRefreshed.getTime() / 1000)) : 'just now'} · auto-refreshes every 60s`
-              }
-            </p>
-          </div>
-          <button
-            onClick={handleRefresh}
-            disabled={loading || refreshing}
-            className="flex items-center gap-2 px-4 py-2 glass gold-border rounded-xl text-sm text-slate-aug hover:text-white transition-all hover:border-gold/40 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing || loading ? 'animate-spin' : ''}`} />
-            Sync Stripe
-          </button>
-        </div>
+    <DashboardShell
+      title={`${new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}. ☀️`}
+      subtitle={error ? <span className="text-crimson-aug">⚠ {error}</span> : loading ? 'Loading your financial data...' : `Last synced ${lastRefreshed ? timeAgo(Math.floor(lastRefreshed.getTime() / 1000)) : 'just now'} · auto-refreshes every 60s`}
+      error={error}
+      isDemoData={isDemoData}
+      lastRefreshed={lastRefreshed}
+      loading={loading}
+      onRefresh={refresh}
+    >
 
         {/* Error state */}
         {error && (
-          <div className="mb-6 p-4 rounded-2xl bg-crimson-aug/10 border border-crimson-aug/30 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-crimson-aug flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-white font-semibold text-sm mb-1">Could not load Stripe data</p>
-              <p className="text-slate-aug text-sm">{error}</p>
-              <button onClick={handleRefresh} className="text-gold text-sm mt-2 hover:text-gold-light transition-colors">
+          <InlineNotice
+            variant="error"
+            message={error}
+            action={(
+              <button
+                onClick={() => refresh()}
+                className="text-gold text-sm hover:text-gold-light transition-colors"
+              >
                 Try again →
               </button>
-            </div>
-          </div>
+            )}
+          />
         )}
 
         {/* KPI Cards */}
@@ -1366,6 +1277,19 @@ export default function DashboardPage() {
             change={metrics ? `$${metrics.availableBalance.toLocaleString()} available` : '—'}
             positive={runwayPositive}
           />
+        </div>
+
+        <div className="glass gold-border rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-1">Decision-grade Forecasting</p>
+            <p className="text-sm text-white">Monte Carlo Scenario Lab is live in Forecasts (P10/P50/P90 + action advice).</p>
+          </div>
+          <Link
+            href="/dashboard/forecasts"
+            className="px-4 py-2 rounded-xl bg-gold/10 border border-gold/20 text-gold hover:bg-gold/20 transition-all text-sm font-semibold whitespace-nowrap"
+          >
+            Open Forecasts
+          </Link>
         </div>
 
         {/* Charts row */}
@@ -1498,7 +1422,7 @@ export default function DashboardPage() {
                 })
               ) : !loading && (
                 <p className="text-slate-aug text-sm text-center py-4">
-                  Connect your Anthropic API key to enable AI insights
+                  AI insights are warming up. Refresh to regenerate recommendations.
                 </p>
               )}
             </div>
@@ -1531,6 +1455,11 @@ export default function DashboardPage() {
               {aiResponse && (
                 <div className="mt-3 p-4 rounded-xl bg-gold/5 border border-gold/20 fade-up">
                   <p className="text-sm text-white leading-relaxed">{aiResponse}</p>
+                  {aiProvider && (
+                    <p className="text-[11px] font-mono uppercase tracking-widest text-slate-aug mt-2">
+                      Source: {aiProvider}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1615,8 +1544,7 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+    </DashboardShell>
   )
 }
 
@@ -2012,15 +1940,57 @@ export async function POST(req: NextRequest) {
 
 ```ts
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import type { CFOContext } from '@/types'
+import { callChatAI } from '@/lib/ai-client'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+function fmtNumber(value: number | undefined, suffix = ''): string {
+  if (value == null || Number.isNaN(value)) return 'unknown'
+  return `${value}${suffix}`
+}
+
+function buildFallbackAnswer(question: string, ctx: Partial<CFOContext>): string {
+  const q = question.toLowerCase()
+  const runway = ctx.runway
+  const churn = ctx.churnRate
+  const mrr = ctx.mrr
+  const growth = ctx.mrrGrowth
+  const revenue = ctx.revenue30d
+
+  if (/runway|cash|burn/.test(q)) {
+    if (runway == null) {
+      return 'Cash timing data is incomplete. Track payouts, refunds, and fixed costs daily so runway projections stop guessing.'
+    }
+    if (runway < 90) {
+      return `You have about ${runway} days of runway. Freeze non-core spend and cut one expense this week to extend runway before you chase growth.`
+    }
+    return `You have roughly ${runway} days of runway. Keep burn disciplined and push one high-confidence growth channel instead of broad experimentation.`
+  }
+
+  if (/price|pricing|raise/.test(q)) {
+    if (churn != null && churn > 6) {
+      return `Don't raise prices yet. Churn is ${churn}%, so improve retention first or you'll leak customers faster than pricing lifts MRR.`
+    }
+    if (mrr != null && growth != null) {
+      return `Test a controlled 8-12% price lift on new signups. MRR is $${mrr} with ${growth}% MoM growth, so run the test and watch churn for 2 billing cycles.`
+    }
+  }
+
+  if (/churn|cancel/.test(q)) {
+    return `Focus on saves before acquisition. Current churn is ${fmtNumber(churn, '%')}; trigger win-back offers for at-risk accounts and audit failed-payment recovery weekly.`
+  }
+
+  return `Current snapshot: MRR $${fmtNumber(mrr)}, 30-day revenue $${fmtNumber(revenue)}, runway ${fmtNumber(runway, ' days')}. Pick one lever this week: cut low-ROI spend, improve retention, or test pricing on new users only.`
+}
 
 export async function POST(req: NextRequest) {
-  try {
-    const { question, context }: { question: string; context?: Partial<CFOContext> } = await req.json()
+  const payload = await req.json().catch(() => ({})) as {
+    question?: string
+    context?: Partial<CFOContext>
+  }
+  const question = payload.question ?? ''
+  const context = payload.context
 
+  try {
     if (!question?.trim()) {
       return NextResponse.json({ error: 'No question provided' }, { status: 400 })
     }
@@ -2050,18 +2020,15 @@ RESPONSE RULES:
 4. If data is missing, say exactly what you'd need to answer better
 5. Never start with "Great question" or any fluff opener`
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 350,
-      system,
-      messages: [{ role: 'user', content: question }],
-    })
+    const answer = await callChatAI(system, question)
 
-    const answer = message.content[0].type === 'text' ? message.content[0].text : ''
-    return NextResponse.json({ answer })
+    return NextResponse.json({ answer, provider: 'lucrum-ai' })
   } catch (error: any) {
     console.error('[ai/cfo] error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({
+      answer: buildFallbackAnswer(question, context ?? {}),
+      provider: 'fallback',
+    })
   }
 }
 
@@ -2073,15 +2040,83 @@ RESPONSE RULES:
 
 ```ts
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import type { CFOContext, AIInsight } from '@/types'
+import { callHeavyAI } from '@/lib/ai-client'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+function toMetric(label: string, value: string): string {
+  return `${value} ${label}`.trim()
+}
+
+function buildFallbackInsights(context: CFOContext): AIInsight[] {
+  const runwayCritical = context.runway < 60
+  const churnWarning = context.churnRate > 5
+  const growthPositive = context.mrrGrowth > 0
+
+  const insights: AIInsight[] = [
+    {
+      id: 'fallback_cash',
+      type: runwayCritical ? 'critical' : 'opportunity',
+      title: runwayCritical ? 'Runway is tight' : 'Runway is stable',
+      body: runwayCritical
+        ? `You have ${context.runway} days of runway. Cut one non-core expense this week to buy decision time.`
+        : `You have ${context.runway} days of runway. Protect this by avoiding fixed-cost increases without clear payback.`,
+      action: runwayCritical ? 'Cut spend' : 'Protect runway',
+      metric: toMetric('days', String(context.runway)),
+      priority: 1,
+    },
+    {
+      id: 'fallback_churn',
+      type: churnWarning ? 'warning' : 'win',
+      title: churnWarning ? 'Retention leak detected' : 'Retention holding',
+      body: churnWarning
+        ? `Churn is ${context.churnRate}%. Focus on failed-payment recovery and targeted save offers before buying more traffic.`
+        : `Churn is ${context.churnRate}%, which is manageable. Keep onboarding tight and monitor cancellation reasons weekly.`,
+      action: 'Review churn',
+      metric: toMetric('churn', `${context.churnRate}%`),
+      priority: 2,
+    },
+    {
+      id: 'fallback_growth',
+      type: growthPositive ? 'win' : 'warning',
+      title: growthPositive ? 'MRR trend is up' : 'Growth is soft',
+      body: growthPositive
+        ? `MRR grew ${context.mrrGrowth}% MoM. Double down on the acquisition channel driving the highest retained subscribers.`
+        : `MRR is ${context.mrrGrowth}% MoM. Run one pricing or packaging test before increasing paid spend.`,
+      action: 'Test pricing',
+      metric: toMetric('MoM', `${context.mrrGrowth}%`),
+      priority: 3,
+    },
+    {
+      id: 'fallback_opportunity',
+      type: 'opportunity',
+      title: 'Next best action',
+      body: `With $${context.revenue30d} in 30-day revenue and ${context.newCustomers30d} new customers, ship one retention experiment and one pricing experiment this month.`,
+      action: 'Run experiments',
+      metric: toMetric('new', `${context.newCustomers30d} customers`),
+      priority: 3,
+    },
+  ]
+
+  return insights
+}
 
 export async function POST(req: NextRequest) {
-  try {
-    const context: CFOContext = await req.json()
+  const contextRaw: Partial<CFOContext> = await req.json().catch(() => ({}))
+  const context: CFOContext = {
+    mrr: Number(contextRaw.mrr ?? 0),
+    mrrGrowth: Number(contextRaw.mrrGrowth ?? 0),
+    revenue30d: Number(contextRaw.revenue30d ?? 0),
+    revenueGrowth: Number(contextRaw.revenueGrowth ?? 0),
+    activeSubscriptions: Number(contextRaw.activeSubscriptions ?? 0),
+    newSubscriptions30d: Number(contextRaw.newSubscriptions30d ?? 0),
+    churnRate: Number(contextRaw.churnRate ?? 0),
+    newCustomers30d: Number(contextRaw.newCustomers30d ?? 0),
+    availableBalance: Number(contextRaw.availableBalance ?? 0),
+    runway: Number(contextRaw.runway ?? 0),
+    cancelledSubscriptions30d: Number(contextRaw.cancelledSubscriptions30d ?? 0),
+  }
 
+  try {
     const prompt = `You are Lucrum's AI CFO engine. Analyze this founder's financial data and generate exactly 4 insights.
 
 FINANCIAL DATA:
@@ -2118,13 +2153,8 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
   ...
 ]`
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    const raw = message.content[0].type === 'text' ? message.content[0].text : '[]'
+    const rawText = await callHeavyAI(undefined, prompt)
+    const raw = rawText || '[]'
 
     // Strip any accidental markdown fences
     const clean = raw.replace(/```json|```/g, '').trim()
@@ -2133,22 +2163,12 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
     // Sort by priority
     insights.sort((a, b) => a.priority - b.priority)
 
-    return NextResponse.json({ insights })
+    return NextResponse.json({ insights, provider: 'lucrum-ai' })
   } catch (error: any) {
     console.error('[ai/insights] error:', error)
-    // Return safe fallback insights instead of crashing the dashboard
     return NextResponse.json({
-      insights: [
-        {
-          id: 'fallback_1',
-          type: 'opportunity',
-          title: 'AI insights loading...',
-          body: 'Connect your Anthropic API key to enable AI-powered financial insights.',
-          action: 'Add API key',
-          metric: null,
-          priority: 1,
-        },
-      ],
+      insights: buildFallbackInsights(context),
+      provider: 'fallback',
     })
   }
 }
@@ -2171,11 +2191,15 @@ interface UseStripeDataReturn {
   loading: boolean
   insightsLoading: boolean
   error: string | null
+  isDemoData: boolean
   lastRefreshed: Date | null
   refresh: () => Promise<void>
 }
 
 const REFRESH_INTERVAL_MS = 60_000 // auto-refresh every 60s
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+const STRIPE_DATA_URL = DEMO_MODE ? '/api/stripe/data?demo=1' : '/api/stripe/data'
+const STRIPE_DEMO_URL = '/api/stripe/data?demo=1'
 
 export function useStripeData(): UseStripeDataReturn {
   const [metrics, setMetrics]           = useState<StripeMetrics | null>(null)
@@ -2183,8 +2207,11 @@ export function useStripeData(): UseStripeDataReturn {
   const [loading, setLoading]           = useState(true)
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [error, setError]               = useState<string | null>(null)
+  const [isDemoData, setIsDemoData]     = useState<boolean>(DEMO_MODE)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const cacheKeyRef = useRef<string>('lucrum:lastInsights:v1')
+  const usingDemoFallbackRef = useRef<boolean>(DEMO_MODE)
 
   const fetchInsights = useCallback(async (ctx: CFOContext) => {
     setInsightsLoading(true)
@@ -2196,10 +2223,33 @@ export function useStripeData(): UseStripeDataReturn {
       })
       if (res.ok) {
         const data = await res.json()
-        setInsights(data.insights ?? [])
+        const next = data.insights ?? []
+        setInsights(next)
+        try {
+          localStorage.setItem(cacheKeyRef.current, JSON.stringify({ savedAt: Date.now(), insights: next }))
+        } catch {
+          // ignore
+        }
+      } else {
+        // If AI fails, try cached insights
+        try {
+          const raw = localStorage.getItem(cacheKeyRef.current)
+          const parsed = raw ? JSON.parse(raw) : null
+          if (parsed?.insights?.length) setInsights(parsed.insights)
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.error('Failed to fetch AI insights:', err)
+      // If offline or API fails, try cached insights
+      try {
+        const raw = localStorage.getItem(cacheKeyRef.current)
+        const parsed = raw ? JSON.parse(raw) : null
+        if (parsed?.insights?.length) setInsights(parsed.insights)
+      } catch {
+        // ignore
+      }
     } finally {
       setInsightsLoading(false)
     }
@@ -2207,7 +2257,18 @@ export function useStripeData(): UseStripeDataReturn {
 
   const fetchMetrics = useCallback(async () => {
     try {
-      const res = await fetch('/api/stripe/data')
+      const primaryUrl = usingDemoFallbackRef.current ? STRIPE_DEMO_URL : STRIPE_DATA_URL
+      let res = await fetch(primaryUrl)
+
+      // If Stripe is disconnected, transparently switch to demo payloads.
+      if (!res.ok && res.status === 401 && !usingDemoFallbackRef.current) {
+        const demoRes = await fetch(STRIPE_DEMO_URL)
+        if (demoRes.ok) {
+          usingDemoFallbackRef.current = true
+          res = demoRes
+        }
+      }
+
       if (!res.ok) {
         const data = await res.json()
         throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -2215,6 +2276,7 @@ export function useStripeData(): UseStripeDataReturn {
       const data: StripeMetrics = await res.json()
       setMetrics(data)
       setError(null)
+      setIsDemoData(usingDemoFallbackRef.current || primaryUrl.includes('demo=1'))
       setLastRefreshed(new Date())
 
       // After we have metrics, fetch AI insights with the real context
@@ -2257,7 +2319,7 @@ export function useStripeData(): UseStripeDataReturn {
     await fetchMetrics()
   }, [fetchMetrics])
 
-  return { metrics, insights, loading, insightsLoading, error, lastRefreshed, refresh }
+  return { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh }
 }
 
 ```

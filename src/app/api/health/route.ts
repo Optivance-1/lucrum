@@ -17,7 +17,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), ms)
   try {
-    // @ts-expect-error signal is valid for fetch
     const result = await promise
     return result
   } finally {

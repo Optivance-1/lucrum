@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import {
   createStripeClient,
   encryptStripeKey,
@@ -8,9 +9,15 @@ import {
   STRIPE_ACCOUNTS_COOKIE,
   STRIPE_KEY_COOKIE,
 } from '@/lib/stripe'
+import { rememberStripeAccountOwner, rememberUserEmail } from '@/lib/user-state'
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { secretKey } = await req.json()
     const normalizedKey = typeof secretKey === 'string' ? secretKey.trim() : ''
 
@@ -22,6 +29,7 @@ export async function POST(req: NextRequest) {
     const stripe = createStripeClient(normalizedKey)
     const account = await stripe.accounts.retrieve()
     const encryptedCookie = encryptStripeKey(normalizedKey)
+    const user = await currentUser()
 
     if (!encryptedCookie && process.env.NODE_ENV === 'production') {
       return NextResponse.json(
@@ -44,9 +52,10 @@ export async function POST(req: NextRequest) {
     // Also maintain a multi-account cookie (encrypted in production).
     const existingRaw = req.cookies.get(STRIPE_ACCOUNTS_COOKIE)?.value
     const existing = existingRaw ? parseStripeAccountsCookie(existingRaw) : null
-    const accounts = (existing?.accounts ?? []).filter(a => a.id !== account.id)
+    const scopedExisting = existing?.userId && existing.userId !== userId ? null : existing
+    const accounts = (scopedExisting?.accounts ?? []).filter(a => a.id !== account.id)
     accounts.unshift({ id: account.id, label: account.business_profile?.name || account.id, secretKey: normalizedKey })
-    const payload = { v: 1 as const, activeId: account.id, accounts: accounts.slice(0, 3) }
+    const payload = { v: 1 as const, userId, activeId: account.id, accounts: accounts.slice(0, 3) }
     const accountsCookie = serializeStripeAccountsCookie(payload)
     if (accountsCookie) {
       response.cookies.set(STRIPE_ACCOUNTS_COOKIE, accountsCookie, {
@@ -57,6 +66,9 @@ export async function POST(req: NextRequest) {
         path: '/',
       })
     }
+
+    await rememberStripeAccountOwner(account.id, userId)
+    await rememberUserEmail(userId, user?.primaryEmailAddress?.emailAddress)
 
     response.cookies.set(STRIPE_KEY_COOKIE, encryptedCookie ?? secretKey, {
       httpOnly: true,

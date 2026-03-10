@@ -1,6 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
-
-export type AIProvider = 'gemini' | 'anthropic'
+export type AIProvider = 'groq' | 'gemini'
 
 type GenerateAITextInput = {
   system?: string
@@ -15,14 +13,15 @@ export type GenerateAITextOutput = {
   provider: AIProvider
 }
 
+const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile'
 const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash'
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514'
 
 function resolveProvider(): AIProvider {
   const configured = process.env.AI_PROVIDER?.toLowerCase()
-  if (configured === 'gemini' || configured === 'anthropic') return configured
+  if (configured === 'groq' || configured === 'gemini') return configured
+  if (process.env.GROQ_API_KEY) return 'groq'
   if (process.env.GEMINI_API_KEY) return 'gemini'
-  return 'anthropic'
+  return 'groq'
 }
 
 function joinPrompt(system: string | undefined, prompt: string): string {
@@ -30,21 +29,44 @@ function joinPrompt(system: string | undefined, prompt: string): string {
   return `${system.trim()}\n\n${prompt}`
 }
 
-async function generateWithAnthropic(input: GenerateAITextInput): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured')
+async function generateWithGroq(input: GenerateAITextInput): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured')
 
-  const anthropic = new Anthropic({ apiKey })
-  const message = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
-    max_tokens: input.maxTokens ?? 350,
+  const model = process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL
+  const url = 'https://api.groq.com/openai/v1/chat/completions'
+  const body = {
+    model,
+    messages: [
+      ...(input.system?.trim() ? [{ role: 'system' as const, content: input.system.trim() }] : []),
+      { role: 'user' as const, content: input.prompt },
+    ],
     temperature: input.temperature ?? 0.3,
-    ...(input.system?.trim() ? { system: input.system } : {}),
-    messages: [{ role: 'user', content: input.prompt }],
+    max_tokens: input.maxTokens ?? 350,
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
   })
 
-  const firstText = message.content.find(block => block.type === 'text')
-  return firstText?.type === 'text' ? firstText.text : ''
+  if (!res.ok) {
+    const details = await res.text()
+    throw new Error(`Groq request failed (${res.status}): ${details}`)
+  }
+
+  const data = await res.json() as {
+    choices?: Array<{
+      message?: { content?: string }
+    }>
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  return (content ?? '').trim()
 }
 
 async function generateWithGemini(input: GenerateAITextInput): Promise<string> {
@@ -94,18 +116,18 @@ async function generateWithGemini(input: GenerateAITextInput): Promise<string> {
 
 export async function generateAIText(input: GenerateAITextInput): Promise<GenerateAITextOutput> {
   const preferred = resolveProvider()
-  const fallback = preferred === 'gemini' ? 'anthropic' : 'gemini'
+  const fallback: AIProvider = preferred === 'groq' ? 'gemini' : 'groq'
 
   try {
-    const text = preferred === 'gemini'
-      ? await generateWithGemini(input)
-      : await generateWithAnthropic(input)
+    const text = preferred === 'groq'
+      ? await generateWithGroq(input)
+      : await generateWithGemini(input)
     return { text, provider: preferred }
   } catch (preferredError) {
     try {
-      const text = fallback === 'gemini'
-        ? await generateWithGemini(input)
-        : await generateWithAnthropic(input)
+      const text = fallback === 'groq'
+        ? await generateWithGroq(input)
+        : await generateWithGemini(input)
       return { text, provider: fallback }
     } catch (fallbackError) {
       const firstMessage =

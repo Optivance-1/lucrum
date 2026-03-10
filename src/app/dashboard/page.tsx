@@ -12,9 +12,11 @@ import {
   Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
 } from 'recharts'
 import { useStripeData } from '@/hooks/useStripeData'
+import { useUserPlan } from '@/hooks/useUserPlan'
 import { formatCurrency, formatPercent, timeAgo } from '@/lib/utils'
 import DashboardShell from '@/components/DashboardShell'
 import InlineNotice from '@/components/InlineNotice'
+import MRRHistory from '@/components/MRRHistory'
 import type { InsightSeverity } from '@/types'
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
@@ -82,10 +84,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function DashboardPage() {
   const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
+  const { plan } = useUserPlan()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'anthropic' | 'fallback' | null>(null)
+  const [aiProvider, setAiProvider] = useState<'groq' | 'gemini' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [billingBusy, setBillingBusy] = useState(false)
 
   const askAI = useCallback(async (question: string) => {
     if (!question.trim()) return
@@ -131,6 +135,23 @@ export default function DashboardPage() {
 
   const runwayPositive = !metrics ? true : metrics.runway > 90 || metrics.runway >= 9999
 
+  const startCheckout = useCallback(async (interval: 'monthly' | 'annual' = 'monthly') => {
+    setBillingBusy(true)
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval }),
+      })
+      const data = await res.json()
+      if (data?.url) {
+        window.location.href = data.url
+      }
+    } finally {
+      setBillingBusy(false)
+    }
+  }, [])
+
   return (
     <DashboardShell
       title={`${new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}. ☀️`}
@@ -141,6 +162,33 @@ export default function DashboardPage() {
       loading={loading}
       onRefresh={refresh}
     >
+
+        {plan === 'free' && (
+          <div className="glass gold-border rounded-2xl p-5 mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 gold-glow">
+            <div>
+              <p className="text-xs font-mono uppercase tracking-widest text-gold mb-1">Upgrade to Pro to unlock MAX CFO</p>
+              <p className="text-sm text-white">
+                Free plan keeps the dashboard. Pro unlocks the full AI CFO, deeper insights, and the action engine.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => startCheckout('monthly')}
+                disabled={billingBusy}
+                className="px-4 py-2 rounded-xl bg-gold text-obsidian font-bold text-sm hover:bg-gold-light transition-all disabled:opacity-50"
+              >
+                {billingBusy ? 'Starting...' : 'Upgrade for $99/mo'}
+              </button>
+              <button
+                onClick={() => startCheckout('annual')}
+                disabled={billingBusy}
+                className="px-4 py-2 rounded-xl glass gold-border text-white font-semibold text-sm hover:border-gold/40 transition-all disabled:opacity-50"
+              >
+                Annual $899
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Error state */}
         {error && (
@@ -432,6 +480,10 @@ export default function DashboardPage() {
               </Link>
             ) : null}
           </div>
+        </div>
+
+        <div className="mb-6">
+          <MRRHistory />
         </div>
 
         {/* Financial summary row */}

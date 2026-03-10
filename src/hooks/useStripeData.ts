@@ -28,8 +28,17 @@ export function useStripeData(): UseStripeDataReturn {
   const [isDemoData, setIsDemoData]     = useState<boolean>(DEMO_MODE)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const invalidationIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const cacheKeyRef = useRef<string>('lucrum:lastInsights:v1')
   const usingDemoFallbackRef = useRef<boolean>(DEMO_MODE)
+
+  const clearInsightsCache = useCallback(() => {
+    try {
+      localStorage.removeItem(cacheKeyRef.current)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const fetchInsights = useCallback(async (ctx: CFOContext) => {
     setInsightsLoading(true)
@@ -119,6 +128,23 @@ export function useStripeData(): UseStripeDataReturn {
     }
   }, [fetchInsights])
 
+  const checkInvalidation = useCallback(async () => {
+    try {
+      const res = await fetch('/api/metrics/invalidation')
+      if (!res.ok) return
+      const data = await res.json()
+      const invalidatedAt = Number(data.invalidatedAt ?? 0)
+      if (!invalidatedAt) return
+
+      if (!lastRefreshed || invalidatedAt > lastRefreshed.getTime()) {
+        clearInsightsCache()
+        await fetchMetrics()
+      }
+    } catch {
+      // ignore
+    }
+  }, [clearInsightsCache, fetchMetrics, lastRefreshed])
+
   // Initial load
   useEffect(() => {
     fetchMetrics()
@@ -131,6 +157,13 @@ export function useStripeData(): UseStripeDataReturn {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [fetchMetrics])
+
+  useEffect(() => {
+    invalidationIntervalRef.current = setInterval(checkInvalidation, 15_000)
+    return () => {
+      if (invalidationIntervalRef.current) clearInterval(invalidationIntervalRef.current)
+    }
+  }, [checkInvalidation])
 
   const refresh = useCallback(async () => {
     setLoading(true)

@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
 import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
 import { calculateChurnRate, calculateMRRGrowth, calculateRunway, getLastNDays } from '@/lib/utils'
 import { createMockStripeMetrics, isDemoModeEnabled } from '@/lib/mockData'
+import { saveSnapshot } from '@/lib/snapshots'
+import {
+  rememberStripeAccountOwner,
+  rememberStripeCustomerOwner,
+  rememberStripeSubscriptionOwner,
+} from '@/lib/user-state'
 import type { StripeMetrics, DailyRevenue, StripeEvent, CashFlowPeriod, CohortRetentionRow, RevenueByPeriod, LeakageSummary } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const secretKey = getStripeKeyFromCookies(req.cookies)
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const secretKey = getStripeKeyFromCookies(req.cookies, userId)
     if (!secretKey) {
       if (isDemoModeEnabled(req.nextUrl.searchParams.get('demo'))) {
         return NextResponse.json(createMockStripeMetrics(), {
@@ -354,6 +366,26 @@ export async function GET(req: NextRequest) {
       currency: balance.available[0]?.currency?.toUpperCase() ?? 'USD',
       fetchedAt: now,
     }
+
+    await Promise.all([
+      saveSnapshot(userId, metrics),
+      rememberStripeAccountOwner(account.id, userId),
+      ...allCustomers.data
+        .filter((customer: any) => typeof customer.id === 'string')
+        .map((customer: any) => rememberStripeCustomerOwner(customer.id, userId)),
+      ...Array.from(
+        new Set(
+          [
+            ...allActiveSubs.data,
+            ...newSubs30d.data,
+            ...cancelledSubs30d.data,
+            ...pastDueSubs.data,
+          ]
+            .map((sub: any) => sub.id)
+            .filter(Boolean)
+        )
+      ).map((subscriptionId: string) => rememberStripeSubscriptionOwner(subscriptionId, userId)),
+    ])
 
     return NextResponse.json(metrics, {
       headers: {

@@ -10,7 +10,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Real churn rate** — cancelled subs / active subs at period start
 - **Actual cash runway** — balance vs real monthly burn
 - **AI-generated insights** — dynamic, based on your real numbers
-- **Conversational AI CFO** — powered by Claude, with your real metrics as context
+-- **Conversational AI CFO** — powered by Groq, with your real metrics as context
 - **Monte Carlo scenario lab** — probabilistic runway + cash ranges (P10/P50/P90)
 
 ## Tech Stack
@@ -19,7 +19,7 @@ Lucrum is a financial intelligence layer that sits on top of Stripe. Founders co
 - **Styling**: Tailwind CSS + custom design system
 - **Charts**: Recharts
 - **Payments Data**: Stripe API v2023-10-16
-- **AI Engine**: Gemini (cost-first default) with Anthropic fallback
+- **AI Engine**: Groq (primary) with Gemini 1.5 fallback
 - **Language**: TypeScript
 
 ## Getting Started
@@ -39,10 +39,11 @@ Fill in your keys:
 STRIPE_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your_gemini_key
+AI_PROVIDER=groq
+GROQ_API_KEY=sk_groq_your_key
+GROQ_MODEL=llama-3.3-70b-versatile
+GEMINI_API_KEY=your_gemini_key   # optional fallback
 GEMINI_MODEL=gemini-1.5-flash
-ANTHROPIC_API_KEY=sk-ant-... # optional fallback
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 COOKIE_ENCRYPTION_KEY=replace_with_a_long_random_secret
 ```
@@ -55,7 +56,7 @@ LUCRUM_DEMO_MODE=true
 
 ## AI Key Handling
 
-- End users do **not** need to enter Gemini/Anthropic API keys.
+- End users do **not** need to enter Groq/Gemini API keys.
 - AI runs server-side with your deployment keys.
 - If model providers are unavailable, Lucrum falls back to deterministic CFO logic so the dashboard still works.
 

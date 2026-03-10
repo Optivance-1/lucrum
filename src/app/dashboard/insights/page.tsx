@@ -23,7 +23,7 @@ export default function AIInsightsPage() {
   const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'anthropic' | 'fallback' | null>(null)
+  const [aiProvider, setAiProvider] = useState<'groq' | 'gemini' | 'fallback' | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
 
   const askAI = useCallback(async (question: string) => {

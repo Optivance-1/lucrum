@@ -126,7 +126,7 @@ export default function DashboardSettingsPage() {
       <div className="glass gold-border rounded-2xl p-6 mt-6">
         <h3 className="font-display text-base font-bold text-white mb-2">AI Runtime</h3>
         <p className="text-slate-aug text-sm">
-          End-users do not need to provide Gemini or Anthropic keys. Lucrum uses server-managed providers and
+          End-users do not need to provide Groq or Gemini keys. Lucrum uses server-managed providers and
           gracefully falls back to deterministic CFO logic if providers are unavailable.
         </p>
       </div>

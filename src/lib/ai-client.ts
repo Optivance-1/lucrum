@@ -11,7 +11,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), ms)
   try {
-    // @ts-expect-error signal is valid for fetch
     const result = await promise
     return result
   } finally {
@@ -28,13 +27,19 @@ function buildMessages(system: string | undefined, user: string): ChatMessage[] 
   return messages
 }
 
-async function callOllama(system: string | undefined, user: string): Promise<string> {
+async function callOllama(
+  system: string | undefined,
+  user: string,
+  scope: 'fast' | 'structured'
+): Promise<string> {
   const baseUrl = process.env.OLLAMA_URL
   if (!baseUrl || process.env.NODE_ENV !== 'development') return ''
 
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
   const body = {
-    model: 'mistral:latest',
+    model: scope === 'structured'
+      ? (process.env.OLLAMA_STRUCTURED_MODEL || 'mistral:latest')
+      : (process.env.OLLAMA_FAST_MODEL || 'llama3.1:8b'),
     messages: buildMessages(system, user),
     temperature: 0.2,
     stream: false,
@@ -91,35 +96,88 @@ async function callRunpod(
   return typeof content === 'string' ? content : ''
 }
 
-async function callTogether(system: string | undefined, user: string): Promise<string> {
-  const apiKey = process.env.TOGETHER_API_KEY
-  const baseUrl = process.env.TOGETHER_BASE_URL || 'https://api.together.xyz/v1'
+async function callGroq(
+  system: string | undefined,
+  user: string,
+  purpose: 'heavy' | 'chat' | 'structured'
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) return ''
 
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
-  const body = {
-    model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-    messages: buildMessages(system, user),
-    temperature: 0.2,
-    stream: false,
-  }
+  const url = 'https://api.groq.com/openai/v1/chat/completions'
 
-  const res = await withTimeout(
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    }),
-    DEFAULT_TIMEOUT_MS
+  const reasoningModel =
+    process.env.GROQ_REASONING_MODEL || 'moonshotai/kimi-k2'
+  const reasoningFallback =
+    process.env.GROQ_REASONING_FALLBACK || 'qwen-qwq-32b'
+  const chatModel =
+    process.env.GROQ_CHAT_MODEL || 'meta-llama/llama-4-scout'
+  const chatFallback =
+    process.env.GROQ_CHAT_FALLBACK || 'llama-3.3-70b-versatile'
+  const structuredModel =
+    process.env.GROQ_STRUCTURED_MODEL || 'qwen-qwq-32b'
+
+  const modelOrder =
+    purpose === 'heavy'
+      ? [reasoningModel, reasoningFallback]
+      : purpose === 'chat'
+      ? [chatModel, chatFallback]
+      : [structuredModel, reasoningModel]
+
+  const maxTokens =
+    purpose === 'heavy' ? 400 : purpose === 'chat' ? 300 : 500
+
+  const messages = buildMessages(
+    system ? `${system.trim()}\n\nBe concise. Under ${purpose === 'heavy' ? 130 : 90} words.` : undefined,
+    user
   )
 
-  if (!res.ok) return ''
-  const data: any = await res.json()
-  const content = data?.choices?.[0]?.message?.content
-  return typeof content === 'string' ? content : ''
+  let lastError: unknown
+
+  for (const model of modelOrder) {
+    try {
+      const res = await withTimeout(
+        fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.2,
+            max_tokens: maxTokens,
+            stream: false,
+          }),
+        }),
+        DEFAULT_TIMEOUT_MS
+      )
+
+      if (res.status === 429) {
+        logFailure(`${purpose}:groq:rate_limit`, new Error(`429 from ${model}`))
+        // try next model immediately
+        continue
+      }
+
+      if (!res.ok) {
+        lastError = new Error(`Groq request failed (${res.status})`)
+        continue
+      }
+
+      const data: any = await res.json()
+      const content = data?.choices?.[0]?.message?.content
+      if (typeof content === 'string' && content.trim()) {
+        return content.trim()
+      }
+    } catch (err) {
+      lastError = err
+      logFailure(`${purpose}:groq:${model}`, err)
+    }
+  }
+
+  if (lastError) throw lastError
+  return ''
 }
 
 function logFailure(scope: string, error: unknown): void {
@@ -129,19 +187,11 @@ function logFailure(scope: string, error: unknown): void {
 }
 
 async function callAiWithRouting(
-  scope: 'heavy' | 'chat',
+  scope: 'heavy' | 'chat' | 'structured',
   system: string | undefined,
   user: string
 ): Promise<string> {
-  // 1. Local Ollama for development
-  try {
-    const ollamaText = await callOllama(system, user)
-    if (ollamaText) return ollamaText
-  } catch (err) {
-    logFailure(`${scope}:ollama`, err)
-  }
-
-  // 2. RunPod (heavy or chat)
+  // 1. RunPod (heavy or chat) – fastest when configured
   try {
     const model =
       scope === 'heavy'
@@ -155,12 +205,24 @@ async function callAiWithRouting(
     logFailure(`${scope}:runpod`, err)
   }
 
-  // 3. Together.ai fallback
+  // 2. Groq — primary backbone
   try {
-    const togetherText = await callTogether(system, user)
-    if (togetherText) return togetherText
+    const groqText = await callGroq(system, user, scope === 'structured' ? 'structured' : scope)
+    if (groqText) return groqText
   } catch (err) {
-    logFailure(`${scope}:together`, err)
+    logFailure(`${scope}:groq`, err)
+  }
+
+  // 3. Local Ollama fallback (free, unlimited in dev)
+  try {
+    const ollamaText = await callOllama(
+      system,
+      user,
+      scope === 'structured' ? 'structured' : 'fast'
+    )
+    if (ollamaText) return ollamaText
+  } catch (err) {
+    logFailure(`${scope}:ollama`, err)
   }
 
   const ts = new Date().toISOString()
@@ -175,4 +237,9 @@ export async function callHeavyAI(system: string | undefined, user: string): Pro
 export async function callChatAI(system: string | undefined, user: string): Promise<string> {
   return callAiWithRouting('chat', system, user)
 }
+
+export async function callStructuredAI(system: string | undefined, user: string): Promise<string> {
+  return callAiWithRouting('structured', system, user)
+}
+
 

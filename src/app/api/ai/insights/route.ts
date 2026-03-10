@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
 import type { CFOContext, AIInsight } from '@/types'
 import { callHeavyAI } from '@/lib/ai-client'
+import { getUserPlan } from '@/lib/subscription'
 
 function toMetric(label: string, value: string): string {
   return `${value} ${label}`.trim()
@@ -59,7 +61,35 @@ function buildFallbackInsights(context: CFOContext): AIInsight[] {
   return insights
 }
 
+function buildFreePlanInsights(context: CFOContext): AIInsight[] {
+  return [
+    {
+      id: 'free_upgrade',
+      type: 'opportunity',
+      title: 'Upgrade to unlock MAX CFO',
+      body: 'Free plan keeps the live dashboard, but Pro unlocks full AI insights, CFO answers, and action engine recommendations.',
+      action: 'Upgrade now',
+      metric: '$99/mo',
+      priority: 1,
+    },
+    {
+      id: 'free_snapshot',
+      type: context.churnRate > 5 ? 'warning' : 'win',
+      title: 'Your current snapshot',
+      body: `MRR is $${context.mrr}, churn is ${context.churnRate}%, and runway is ${context.runway} days. Pro turns this into a prioritized operating plan.`,
+      action: 'View plans',
+      metric: `${context.runway} days`,
+      priority: 2,
+    },
+  ]
+}
+
 export async function POST(req: NextRequest) {
+  const { userId } = await auth()
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const contextRaw: Partial<CFOContext> = await req.json().catch(() => ({}))
   const context: CFOContext = {
     mrr: Number(contextRaw.mrr ?? 0),
@@ -76,6 +106,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const plan = await getUserPlan(userId)
+    if (plan === 'free') {
+      return NextResponse.json({
+        insights: buildFreePlanInsights(context),
+        provider: 'fallback',
+        plan,
+      })
+    }
+
     const prompt = `You are Lucrum's AI CFO engine. Analyze this founder's financial data and generate exactly 4 insights.
 
 FINANCIAL DATA:
@@ -122,7 +161,7 @@ Respond ONLY with valid JSON array, no markdown, no preamble:
     // Sort by priority
     insights.sort((a, b) => a.priority - b.priority)
 
-    return NextResponse.json({ insights, provider: 'lucrum-ai' })
+    return NextResponse.json({ insights, provider: 'lucrum-ai', plan })
   } catch (error: any) {
     console.error('[ai/insights] error:', error)
     return NextResponse.json({
