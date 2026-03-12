@@ -22,6 +22,7 @@
   "exclude": [
     "node_modules",
     "_backup_pre_phase1_merge_20260301_191720",
-    "project_singlefile"
+    "project_singlefile",
+    "stripe-app"
   ]
 }

@@ -5,11 +5,19 @@ import Link from 'next/link'
 import DashboardShell from '@/components/DashboardShell'
 import { useStripeData } from '@/hooks/useStripeData'
 import { useUserPlan } from '@/hooks/useUserPlan'
-import { Plus, Save, SlidersHorizontal, Trash2, CheckCircle, Crown, Lock, CreditCard, Key, Bell } from 'lucide-react'
+import { Save, SlidersHorizontal, CheckCircle, Crown, Lock, CreditCard, Key, Bell, LogOut, Shield, ExternalLink } from 'lucide-react'
 
 type SettingsState = {
   taxRateOverride?: number
   payoutDelayDaysOverride?: number
+}
+
+type StripeConnectionInfo = {
+  connected: boolean
+  stripeAccountId?: string
+  scope?: 'read_only' | 'read_write'
+  connectedAt?: number
+  businessName?: string
 }
 
 const STORAGE_KEY = 'lucrum:dashboardSettings:v1'
@@ -19,10 +27,8 @@ export default function DashboardSettingsPage() {
   const { plan, interval } = useUserPlan()
   const [state, setState] = useState<SettingsState>({})
   const [saved, setSaved] = useState(false)
-  const [accounts, setAccounts] = useState<{ id: string; label: string; active: boolean }[]>([])
-  const [newLabel, setNewLabel] = useState('')
-  const [newKey, setNewKey] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [connection, setConnection] = useState<StripeConnectionInfo | null>(null)
+  const [disconnecting, setDisconnecting] = useState(false)
   const [portalLoading, setPortalLoading] = useState(false)
 
   useEffect(() => {
@@ -32,13 +38,17 @@ export default function DashboardSettingsPage() {
     } catch { /* ignore */ }
   }, [])
 
-  const loadAccounts = async () => {
-    const res = await fetch('/api/stripe/accounts')
-    const data = await res.json()
-    setAccounts(data.accounts ?? [])
+  const loadConnection = async () => {
+    try {
+      const res = await fetch('/api/stripe/disconnect')
+      const data = await res.json()
+      setConnection(data)
+    } catch {
+      setConnection({ connected: false })
+    }
   }
 
-  useEffect(() => { loadAccounts().catch(() => {}) }, [])
+  useEffect(() => { loadConnection() }, [])
 
   const save = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
@@ -57,13 +67,30 @@ export default function DashboardSettingsPage() {
     }
   }, [])
 
+  const handleDisconnect = async () => {
+    if (!confirm('Are you sure you want to disconnect your Stripe account? Your Lucrum subscription will remain active.')) {
+      return
+    }
+    setDisconnecting(true)
+    try {
+      const res = await fetch('/api/stripe/disconnect', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setConnection({ connected: false })
+        window.location.href = '/connect'
+      }
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
   const subtitle = useMemo(() => {
     if (error) return <span className="text-crimson-aug">{error}</span>
     return 'Manage your plan, billing, connected accounts, and preferences'
   }, [error])
 
-  const planLabel = plan === 'enterprise' ? 'Enterprise' : plan === 'solo' ? 'Solo Dev' : 'Demo'
-  const planColor = plan === 'enterprise' ? 'text-gold' : plan === 'solo' ? 'text-emerald-aug' : 'text-slate-aug'
+  const planLabel = plan === 'enterprise' ? 'Enterprise' : plan === 'growth' ? 'Growth' : plan === 'solo' ? 'Solo Dev' : 'Demo'
+  const planColor = plan === 'enterprise' ? 'text-gold' : plan === 'growth' ? 'text-emerald-aug' : plan === 'solo' ? 'text-emerald-aug' : 'text-slate-aug'
 
   return (
     <DashboardShell
@@ -101,10 +128,13 @@ export default function DashboardSettingsPage() {
               <p className="text-sm text-slate-aug mt-1">You are on the demo plan. Upgrade to unlock all features.</p>
             )}
             {plan === 'solo' && (
-              <p className="text-sm text-slate-aug mt-1">5 MAX prompts/day with all features. Upgrade to Enterprise for unlimited prompts and 10 Stripe accounts.</p>
+              <p className="text-sm text-slate-aug mt-1">5 MAX prompts/day with all features. Upgrade to Growth for action execution.</p>
+            )}
+            {plan === 'growth' && (
+              <p className="text-sm text-slate-aug mt-1">Full access to action execution and outcome tracking.</p>
             )}
             {plan === 'enterprise' && (
-              <p className="text-sm text-slate-aug mt-1">Full access to all features including Action Execution and Priority AI.</p>
+              <p className="text-sm text-slate-aug mt-1">Full access to all features including Priority AI (GLM-5).</p>
             )}
           </div>
           <div className="flex gap-3">
@@ -122,81 +152,101 @@ export default function DashboardSettingsPage() {
                 View Plans
               </Link>
             )}
-            {plan === 'solo' && (
+            {(plan === 'solo' || plan === 'growth') && (
               <Link href="/pricing?plan=enterprise" className="px-4 py-2 rounded-xl bg-gold text-obsidian font-bold text-sm hover:bg-gold-light transition-all flex items-center gap-2">
-                <Crown className="w-4 h-4" /> Upgrade to Enterprise
+                <Crown className="w-4 h-4" /> Upgrade
               </Link>
             )}
           </div>
         </div>
       </div>
 
-      {/* Connected Stripe Accounts */}
+      {/* Connected Stripe Account */}
       <div className="glass gold-border rounded-2xl p-6 mb-6">
-        <h3 className="font-display text-base font-bold text-white mb-4">Connected Stripe Accounts</h3>
-        <div className="space-y-2 mb-6">
-          {accounts.length === 0 ? (
-            <p className="text-slate-aug text-sm">No saved accounts yet. Add one below.</p>
-          ) : (
-            accounts.map((a) => (
-              <div key={a.id} className="flex items-center justify-between rounded-xl bg-white/5 border border-[rgba(201,168,76,0.12)] p-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-white font-semibold truncate">{a.label}</p>
-                    {a.active && (
-                      <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-emerald-aug/10 border border-emerald-aug/20 text-emerald-aug flex items-center gap-1">
-                        <CheckCircle className="w-3 h-3" /> Active
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs font-mono text-slate-aug mt-1">{a.id}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button disabled={busy || a.active} onClick={async () => {
-                    setBusy(true)
-                    try {
-                      await fetch('/api/stripe/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'switch', id: a.id }) })
-                      await loadAccounts()
-                      window.location.href = '/dashboard'
-                    } finally { setBusy(false) }
-                  }} className="px-3 py-2 rounded-xl text-sm font-semibold bg-gold/10 border border-gold/20 text-gold hover:bg-gold/20 disabled:opacity-40">Switch</button>
-                  <button disabled={busy} onClick={async () => {
-                    setBusy(true)
-                    try {
-                      await fetch('/api/stripe/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'remove', id: a.id }) })
-                      await loadAccounts()
-                    } finally { setBusy(false) }
-                  }} className="px-3 py-2 rounded-xl text-sm font-semibold bg-crimson-aug/10 border border-crimson-aug/20 text-crimson-aug hover:bg-crimson-aug/15 disabled:opacity-40 flex items-center gap-2">
-                    <Trash2 className="w-4 h-4" /> Remove
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5 text-gold" />
+          <h3 className="font-display text-base font-bold text-white">Connected Stripe Account</h3>
         </div>
 
-        <div className="rounded-xl bg-white/5 border border-[rgba(201,168,76,0.12)] p-5">
-          <p className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-3">Add account</p>
-          <div className="grid md:grid-cols-3 gap-3">
-            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Label (e.g. Lucrum Prod)" className="bg-obsidian-100 border border-[rgba(201,168,76,0.15)] rounded-xl px-3 py-2 text-sm text-white placeholder-slate-aug/40 focus:outline-none focus:border-gold/40" />
-            <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="sk_live_... or sk_test_..." className="md:col-span-2 bg-obsidian-100 border border-[rgba(201,168,76,0.15)] rounded-xl px-3 py-2 text-sm text-white placeholder-slate-aug/40 focus:outline-none focus:border-gold/40 font-mono" />
-          </div>
-          <button disabled={busy || !newKey.trim()} onClick={async () => {
-            setBusy(true)
-            try {
-              const res = await fetch('/api/stripe/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add', label: newLabel, secretKey: newKey }) })
-              const data = await res.json()
-              if (data?.success) { setNewKey(''); setNewLabel(''); await loadAccounts(); window.location.href = '/dashboard' }
-            } finally { setBusy(false) }
-          }} className="mt-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-gold text-obsidian font-bold text-sm hover:bg-gold-light transition-all disabled:opacity-40">
-            <Plus className="w-4 h-4" /> Add & Switch
-          </button>
-          {plan !== 'enterprise' && accounts.length >= 1 && (
-            <p className="text-xs text-slate-aug mt-3 flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Multi-account (up to 10) requires Enterprise plan.
+        {connection?.connected ? (
+          <div className="space-y-4">
+            <div className="rounded-xl bg-white/5 border border-[rgba(201,168,76,0.12)] p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-white font-semibold">{connection.businessName || 'Stripe Account'}</p>
+                  <p className="text-xs font-mono text-slate-aug mt-1">{connection.stripeAccountId}</p>
+                </div>
+                <span className="text-xs font-mono px-2 py-1 rounded-full bg-emerald-aug/10 border border-emerald-aug/20 text-emerald-aug flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> Connected
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <p className="text-xs font-mono text-slate-aug mb-1">Access Level</p>
+                  <p className="text-sm text-white">
+                    {connection.scope === 'read_write' ? 'Read + Write' : 'Read Only'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-mono text-slate-aug mb-1">Connected</p>
+                  <p className="text-sm text-white">
+                    {connection.connectedAt 
+                      ? new Date(connection.connectedAt).toLocaleDateString()
+                      : 'Unknown'}
+                  </p>
+                </div>
+              </div>
+
+              {connection.scope === 'read_only' && (plan === 'growth' || plan === 'enterprise') && (
+                <div className="p-3 rounded-lg bg-gold/10 border border-gold/20 mb-4">
+                  <p className="text-sm text-gold">
+                    Your plan supports action execution, but your Stripe connection is read-only.
+                  </p>
+                  <Link 
+                    href="/api/stripe/connect?plan=enterprise&upgrade=true" 
+                    className="text-sm text-gold underline mt-1 inline-block"
+                  >
+                    Reconnect with write access →
+                  </Link>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-4 border-t border-[rgba(201,168,76,0.1)]">
+                <a 
+                  href="https://dashboard.stripe.com/settings/apps"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-slate-aug hover:text-white transition-colors flex items-center gap-1"
+                >
+                  Manage in Stripe Dashboard <ExternalLink className="w-3 h-3" />
+                </a>
+                <button
+                  onClick={handleDisconnect}
+                  disabled={disconnecting}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-crimson-aug/10 border border-crimson-aug/20 text-crimson-aug text-sm font-semibold hover:bg-crimson-aug/15 disabled:opacity-40"
+                >
+                  <LogOut className="w-4 h-4" />
+                  {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+                </button>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-aug">
+              Your Stripe connection uses OAuth. Lucrum never stores your secret key.
             </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="rounded-xl bg-white/5 border border-[rgba(201,168,76,0.12)] p-5 text-center">
+            <p className="text-slate-aug mb-4">No Stripe account connected.</p>
+            <Link
+              href="/connect"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#635BFF] text-white font-bold text-sm hover:opacity-90 transition-all"
+            >
+              Connect with Stripe
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Team Members — Enterprise only */}

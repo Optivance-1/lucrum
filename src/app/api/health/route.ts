@@ -31,6 +31,7 @@ export async function GET() {
 
   const groqKey = process.env.GROQ_API_KEY
   const geminiKey = process.env.GOOGLE_AI_API_KEY
+  const nvidiaKey = process.env.NVIDIA_API_KEY
   const ollamaUrl = process.env.OLLAMA_URL
   const runpodKey = process.env.RUNPOD_API_KEY
   const runpodHeavy = process.env.RUNPOD_ENDPOINT_HEAVY_URL
@@ -81,6 +82,29 @@ export async function GET() {
     )
   } else {
     providers.gemini = 'not_configured'
+  }
+
+  if (nvidiaKey) {
+    checks.push(
+      pingProvider('glm5', () =>
+        fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${nvidiaKey}` },
+          body: JSON.stringify({
+            model: process.env.NVIDIA_GLM_MODEL || 'thudm/glm-4-9b-chat',
+            messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+            temperature: 0,
+            max_tokens: 3,
+            stream: false,
+          }),
+        })
+      ).then(r => {
+        providers.glm5 = r.status
+        responseTimes.glm5 = r.ms
+      })
+    )
+  } else {
+    providers.glm5 = 'not_configured'
   }
 
   if (ollamaUrl) {
@@ -146,6 +170,7 @@ export async function GET() {
   }
 
   const activeProvider = providers.groq === 'ok' ? 'groq'
+    : providers.glm5 === 'ok' ? 'glm5'
     : providers.runpod === 'ok' ? 'runpod'
     : providers.gemini === 'ok' ? 'gemini'
     : providers.ollama === 'ok' ? 'ollama'

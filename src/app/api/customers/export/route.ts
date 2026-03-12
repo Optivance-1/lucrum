@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
+import { auth } from '@clerk/nextjs/server'
+import { getStripeClient } from '@/lib/stripe-connection'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const secretKey = getStripeKeyFromCookies(req.cookies)
-    if (!secretKey) {
-      return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const stripe = createStripeClient(secretKey)
+    const stripe = await getStripeClient(userId)
+    if (!stripe) {
+      return NextResponse.json({ 
+        error: 'Stripe not connected',
+        action: 'connect',
+        connectUrl: '/api/stripe/connect'
+      }, { status: 401 })
+    }
     const now = Math.floor(Date.now() / 1000)
     const d30 = now - 30 * 86400
     const d365 = now - 365 * 86400

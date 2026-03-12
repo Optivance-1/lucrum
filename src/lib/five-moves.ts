@@ -12,6 +12,7 @@ import { scoreDecisions } from '@/lib/decision-scorer'
 import { runSimulation, hashSimConfig, getCachedSimulation, cacheSimulation } from '@/lib/monte-carlo'
 import { callHeavyAI, stripThinking } from '@/lib/ai-client'
 import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { recordMoveGeneration } from '@/lib/benchmark-dataset'
 
 const RISK_COLORS: Record<MoveRisk, string> = {
   cutthroat: '#FF3B5C',
@@ -173,10 +174,18 @@ Simulation vs baseline:
   Composite score: ${m.metrics.compositeScore.toFixed(0)}/100
 `).join('')}
 
+SECOND-ORDER ANALYSIS REQUIRED:
+For each move, go beyond the obvious. Consider:
+- What does executing Move 1 signal to customers?
+- If churn is elevated, what does that imply about product-market fit vs pricing vs onboarding?
+- Which move has compounding effects over 12 months vs which is one-time?
+- What is the opportunity cost of NOT executing Move 1?
+Your rationale should include at least one non-obvious insight that a surface-level analysis would miss.
+
 For EACH of the 5 moves write:
   title: 4-6 word punchy title
   summary: 1 sentence what this move does
-  rationale: 2 sentences why the math supports this
+  rationale: 2 sentences why the math supports this (include one non-obvious insight)
   tradeoff: 1 sentence what the founder gives up
   maxStatement: MAX's direct take, under 60 words, first person, reference the numbers
   timeToExecute: "Execute now" OR "This week" OR "This month"
@@ -237,6 +246,19 @@ Respond ONLY with valid JSON — no markdown, no preamble:
   }
 
   await safeKvSet(cacheKey, result, 1800)
+
+  // Record move generation for benchmark dataset (fire and forget)
+  const mrrBand = metrics.mrr < 1000 ? '$0-1K' :
+    metrics.mrr < 5000 ? '$1K-5K' :
+    metrics.mrr < 10000 ? '$5K-10K' :
+    metrics.mrr < 25000 ? '$10K-25K' :
+    metrics.mrr < 50000 ? '$25K-50K' : '$50K+'
+  
+  recordMoveGeneration(
+    mrrBand,
+    moves.map(m => m.title),
+    baseline.riskScore
+  ).catch(err => console.error('[five-moves] dataset recording failed:', err))
 
   return result
 }

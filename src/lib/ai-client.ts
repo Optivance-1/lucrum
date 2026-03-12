@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 10_000
+const GLM5_TIMEOUT_MS = 30_000
 
 type ChatRole = 'system' | 'user' | 'assistant'
 
@@ -96,6 +97,51 @@ async function callRunpod(
   return typeof content === 'string' ? content : ''
 }
 
+async function callGLM5(
+  system: string | undefined,
+  user: string
+): Promise<string> {
+  const apiKey = process.env.NVIDIA_API_KEY
+  if (!apiKey) return ''
+
+  const url = 'https://integrate.api.nvidia.com/v1/chat/completions'
+  const model = process.env.NVIDIA_GLM_MODEL || 'thudm/glm-4-9b-chat'
+
+  const start = Date.now()
+  const res = await withTimeout(
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: buildMessages(system, user),
+        temperature: 0.2,
+        max_tokens: 500,
+        stream: false,
+      }),
+    }),
+    GLM5_TIMEOUT_MS
+  )
+
+  const remaining = res.headers.get('x-ratelimit-remaining-requests')
+  if (remaining && parseInt(remaining, 10) < 100) {
+    console.warn(`[glm5] rate limit low: ${remaining} requests remaining`)
+  }
+
+  if (!res.ok) throw new Error(`GLM-5 request failed: ${res.status}`)
+  const data: any = await res.json()
+  const content = data?.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) return ''
+
+  const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  const ms = Date.now() - start
+  console.log(`[glm5] response in ${ms}ms`)
+  return cleaned
+}
+
 async function callGroq(
   system: string | undefined,
   user: string,
@@ -191,43 +237,75 @@ async function callAiWithRouting(
   system: string | undefined,
   user: string
 ): Promise<string> {
-  // 1. RunPod (heavy or chat) – fastest when configured
-  try {
-    const model =
-      scope === 'heavy'
-        ? 'meta-llama/Llama-3.3-70B-Instruct'
-        : 'Qwen/Qwen2.5-14B-Instruct'
-    const endpointKey =
-      scope === 'heavy' ? 'RUNPOD_ENDPOINT_HEAVY_URL' : 'RUNPOD_ENDPOINT_CHAT_URL'
-    const runpodText = await callRunpod(endpointKey, model, system, user)
-    if (runpodText) return runpodText
-  } catch (err) {
-    logFailure(`${scope}:runpod`, err)
+  if (scope === 'heavy') {
+    // Heavy: RunPod → GLM-5 → Kimi K2 → Qwen → Ollama
+    try {
+      const runpodText = await callRunpod('RUNPOD_ENDPOINT_HEAVY_URL', 'meta-llama/Llama-3.3-70B-Instruct', system, user)
+      if (runpodText) return runpodText
+    } catch (err) { logFailure('heavy:runpod', err) }
+
+    try {
+      const glmText = await callGLM5(system, user)
+      if (glmText) return glmText
+    } catch (err) { logFailure('heavy:glm5', err) }
+
+    try {
+      const groqText = await callGroq(system, user, 'heavy')
+      if (groqText) return groqText
+    } catch (err) { logFailure('heavy:groq', err) }
+
+    try {
+      const ollamaText = await callOllama(system, user, 'fast')
+      if (ollamaText) return ollamaText
+    } catch (err) { logFailure('heavy:ollama', err) }
+  } else if (scope === 'chat') {
+    // Chat: Llama 4 Scout on Groq stays primary — unchanged
+    try {
+      const runpodText = await callRunpod('RUNPOD_ENDPOINT_CHAT_URL', 'Qwen/Qwen2.5-14B-Instruct', system, user)
+      if (runpodText) return runpodText
+    } catch (err) { logFailure('chat:runpod', err) }
+
+    try {
+      const groqText = await callGroq(system, user, 'chat')
+      if (groqText) return groqText
+    } catch (err) { logFailure('chat:groq', err) }
+
+    try {
+      const ollamaText = await callOllama(system, user, 'fast')
+      if (ollamaText) return ollamaText
+    } catch (err) { logFailure('chat:ollama', err) }
+  } else {
+    // Structured: GLM-5 → Qwen 3 → Kimi K2 → Ollama
+    try {
+      const glmText = await callGLM5(system, user)
+      if (glmText) return glmText
+    } catch (err) { logFailure('structured:glm5', err) }
+
+    try {
+      const groqText = await callGroq(system, user, 'structured')
+      if (groqText) return groqText
+    } catch (err) { logFailure('structured:groq', err) }
+
+    try {
+      const ollamaText = await callOllama(system, user, 'structured')
+      if (ollamaText) return ollamaText
+    } catch (err) { logFailure('structured:ollama', err) }
   }
 
-  // 2. Groq — primary backbone
-  try {
-    const groqText = await callGroq(system, user, scope === 'structured' ? 'structured' : scope)
-    if (groqText) return groqText
-  } catch (err) {
-    logFailure(`${scope}:groq`, err)
-  }
-
-  // 3. Local Ollama fallback (free, unlimited in dev)
-  try {
-    const ollamaText = await callOllama(
-      system,
-      user,
-      scope === 'structured' ? 'structured' : 'fast'
-    )
-    if (ollamaText) return ollamaText
-  } catch (err) {
-    logFailure(`${scope}:ollama`, err)
-  }
-
-  const ts = new Date().toISOString()
   logFailure(scope, new Error('All AI providers failed'))
-  return 'AI analysis temporarily unavailable. Your metrics are still accurate.'
+  return scope === 'structured'
+    ? '[]'
+    : 'AI analysis temporarily unavailable. Your metrics are still accurate.'
+}
+
+export async function callGLM5AI(system: string | undefined, user: string): Promise<string> {
+  try {
+    const result = await callGLM5(system, user)
+    if (result) return result
+  } catch (err) {
+    logFailure('glm5:direct', err)
+  }
+  return callHeavyAI(system, user)
 }
 
 export async function callHeavyAI(system: string | undefined, user: string): Promise<string> {

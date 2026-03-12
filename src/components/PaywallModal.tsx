@@ -9,7 +9,7 @@ interface PaywallModalProps {
   onClose?: () => void
   trigger: 'demo_exhausted' | 'feature_locked' | 'manual'
   lockedFeature?: string
-  requiredPlan?: 'solo' | 'enterprise'
+  requiredPlan?: 'solo' | 'growth' | 'enterprise'
   lastMaxAnswer?: string
 }
 
@@ -41,7 +41,7 @@ export default function PaywallModal({
 
   if (!isOpen) return null
 
-  const goToPricing = (plan: 'solo' | 'enterprise') => {
+  const goToPricing = (plan: 'solo' | 'growth' | 'enterprise') => {
     router.push(`/pricing?plan=${plan}`)
   }
 
@@ -81,18 +81,33 @@ export default function PaywallModal({
             To keep talking to MAX, pick a plan:
           </p>
 
-          <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-6">
             <button
               onClick={() => goToPricing('solo')}
               className="rounded-xl glass gold-border p-4 text-left hover:border-gold/50 transition-all group"
             >
               <div className="flex items-center gap-2 mb-2">
                 <Zap className="w-4 h-4 text-gold" />
-                <span className="text-xs font-mono uppercase tracking-widest text-gold">Solo Dev</span>
+                <span className="text-xs font-mono uppercase tracking-widest text-gold">Solo</span>
               </div>
-              <p className="font-display text-xl font-bold text-white">$12<span className="text-sm font-normal text-slate-aug">/mo</span></p>
-              <p className="text-xs text-slate-aug mt-1">5 prompts/day + all features</p>
+              <p className="font-display text-xl font-bold text-white">$19<span className="text-sm font-normal text-slate-aug">/mo</span></p>
+              <p className="text-xs text-slate-aug mt-1">AI CFO + insights</p>
               <span className="mt-3 inline-block text-xs font-semibold text-gold group-hover:text-gold-light transition-colors">
+                Start &rarr;
+              </span>
+            </button>
+
+            <button
+              onClick={() => goToPricing('growth')}
+              className="rounded-xl bg-gradient-to-b from-emerald-aug/15 to-emerald-aug/5 border-2 border-emerald-aug/40 p-4 text-left hover:border-emerald-aug/60 transition-all group"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="w-4 h-4 text-emerald-aug" />
+                <span className="text-xs font-mono uppercase tracking-widest text-emerald-aug">Growth</span>
+              </div>
+              <p className="font-display text-xl font-bold text-white">$49<span className="text-sm font-normal text-slate-aug">/mo</span></p>
+              <p className="text-xs text-slate-aug mt-1">+ Action Execution</p>
+              <span className="mt-3 inline-block text-xs font-semibold text-emerald-aug group-hover:opacity-80 transition-colors">
                 Start &rarr;
               </span>
             </button>
@@ -122,7 +137,7 @@ export default function PaywallModal({
   }
 
   // Feature locked variant
-  const planLabel = requiredPlan === 'enterprise' ? 'Enterprise' : 'Solo Dev'
+  const planLabel = requiredPlan === 'enterprise' ? 'Enterprise' : requiredPlan === 'growth' ? 'Growth' : 'Solo Dev'
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-obsidian/80 backdrop-blur-sm" onClick={handleBackdropClick} />
@@ -153,7 +168,9 @@ export default function PaywallModal({
         <p className="text-sm text-slate-aug mb-6 leading-relaxed">
           {requiredPlan === 'enterprise'
             ? 'Unlimited MAX prompts, multi-account (10 Stripe accounts), team seats, and priority AI are available on the Enterprise plan.'
-            : 'This feature requires a Solo Dev or Enterprise subscription to unlock.'}
+            : requiredPlan === 'growth'
+            ? 'Action Execution requires a Growth or Enterprise plan. Execute Stripe actions directly from Lucrum.'
+            : 'This feature requires a paid subscription to unlock.'}
         </p>
 
         <button

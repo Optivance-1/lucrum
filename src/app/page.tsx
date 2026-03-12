@@ -2,7 +2,15 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
-import { ArrowRight, Zap, Brain, TrendingUp, Shield, Check, Star } from 'lucide-react'
+import { ArrowRight, Zap, Brain, TrendingUp, Shield, Check, Star, BarChart3 } from 'lucide-react'
+import PlatformROIBanner from '@/components/PlatformROIBanner'
+
+interface DatasetStats {
+  decisionsAnalyzed: string
+  businessesServed: string
+  averageOutcomeImprovement: string
+  averageRunwayExtended: string
+}
 
 const FEATURES = [
   { icon: Zap, title: 'Connect in 60 seconds', desc: 'Plug in your Stripe account. No forms. No jargon. No finance degree required.', color: 'gold' },
@@ -29,6 +37,7 @@ export default function HomePage() {
   const [insightIdx, setInsightIdx] = useState(0)
   const [visible, setVisible] = useState(true)
   const [annual, setAnnual] = useState(false)
+  const [datasetStats, setDatasetStats] = useState<DatasetStats | null>(null)
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -39,6 +48,27 @@ export default function HomePage() {
       }, 400)
     }, 3500)
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/dataset/stats')
+      .then(res => res.json())
+      .then(data => {
+        setDatasetStats({
+          decisionsAnalyzed: data.decisionsAnalyzed || '0',
+          businessesServed: data.businessesServed || '0',
+          averageOutcomeImprovement: data.averageOutcomeImprovement || '12%',
+          averageRunwayExtended: data.averageRunwayExtended || '15 days',
+        })
+      })
+      .catch(() => {
+        setDatasetStats({
+          decisionsAnalyzed: '0',
+          businessesServed: '0',
+          averageOutcomeImprovement: '12%',
+          averageRunwayExtended: '15 days',
+        })
+      })
   }, [])
 
   return (
@@ -111,11 +141,46 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Dataset Stats Widget */}
+      {datasetStats && (parseInt(datasetStats.decisionsAnalyzed.replace(/[^0-9]/g, '')) > 0 || true) && (
+        <section className="py-8 border-y border-[rgba(201,168,76,0.1)] bg-gradient-to-r from-gold/5 via-transparent to-emerald-aug/5">
+          <div className="max-w-4xl mx-auto px-6">
+            <div className="glass gold-border rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-gold/10 border border-gold/20 flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6 text-gold" />
+                </div>
+                <div>
+                  <p className="text-xs font-mono uppercase tracking-widest text-gold mb-1">Live Intelligence</p>
+                  <p className="text-white font-display font-bold">
+                    {datasetStats.decisionsAnalyzed} founder decisions analyzed
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-6 text-center">
+                <div>
+                  <div className="font-display text-2xl font-bold text-emerald-aug">{datasetStats.averageOutcomeImprovement}</div>
+                  <div className="text-xs text-slate-aug">Avg outcome lift</div>
+                </div>
+                <div>
+                  <div className="font-display text-2xl font-bold text-gold">{datasetStats.averageRunwayExtended}</div>
+                  <div className="text-xs text-slate-aug">Avg runway extended</div>
+                </div>
+                <div>
+                  <div className="font-display text-2xl font-bold text-white">{datasetStats.businessesServed}</div>
+                  <div className="text-xs text-slate-aug">Businesses served</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Stats bar */}
       <section className="py-12 border-y border-[rgba(201,168,76,0.1)]">
         <div className="max-w-4xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
           {[
-            { val: '$12', label: 'Starting per month' },
+            { val: '$19', label: 'Starting per month' },
             { val: '60s', label: 'To connect Stripe' },
             { val: '50K', label: 'Simulations per analysis' },
             { val: 'AI', label: 'Powered CFO engine' },
@@ -173,21 +238,50 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Platform ROI */}
+      <PlatformROIBanner />
+
+      {/* Research Section */}
+      <section className="py-16 px-6 border-y border-[rgba(201,168,76,0.1)]">
+        <div className="max-w-4xl mx-auto">
+          <div className="glass gold-border rounded-2xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-3">
+                <BarChart3 className="w-5 h-5 text-gold" />
+                <span className="text-xs font-mono uppercase tracking-widest text-gold">Research</span>
+              </div>
+              <h3 className="font-display text-2xl font-bold text-white mb-2">
+                The State of SaaS Survival
+              </h3>
+              <p className="text-slate-aug">
+                Real data from real Stripe businesses. What actually happens when founders raise prices, recover payments, or fight churn?
+              </p>
+            </div>
+            <Link
+              href="/reports"
+              className="px-6 py-3 rounded-xl bg-gold text-obsidian font-bold text-sm hover:bg-gold-light transition-all flex items-center gap-2 whitespace-nowrap"
+            >
+              Read the research <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* Pricing preview */}
       <section id="pricing" className="py-32 px-6">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="font-display text-4xl md:text-5xl font-bold text-white mb-4">
-            Starting at <span className="text-gradient-gold">$12/mo</span>
+            Starting at <span className="text-gradient-gold">$19/mo</span>
           </h2>
-          <p className="text-slate-aug text-lg mb-8">Two plans. No free tier. No fluff.</p>
+          <p className="text-slate-aug text-lg mb-8">Three plans. No free tier. No fluff.</p>
 
-          <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             <div className="glass gold-border rounded-2xl p-8 text-left">
               <div className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-2">Solo Dev</div>
-              <div className="font-display text-3xl font-bold text-white mb-1">$12<span className="text-lg text-slate-aug font-normal">/mo</span></div>
-              <p className="text-sm text-slate-aug mb-4">For indie hackers and solo founders</p>
+              <div className="font-display text-3xl font-bold text-white mb-1">$19<span className="text-lg text-slate-aug font-normal">/mo</span></div>
+              <p className="text-sm text-slate-aug mb-4">AI CFO + insights</p>
               <ul className="space-y-2 mb-6">
-                {['5 MAX prompts per day', 'Five Moves Engine', 'Action Execution', 'Full Analytics + Audit Log'].map(f => (
+                {['5 MAX prompts per day', 'Five Moves Engine', 'Full Analytics + Audit Log', 'Webhook Alerts'].map(f => (
                   <li key={f} className="flex items-center gap-2 text-sm text-slate-aug"><Check className="w-4 h-4 text-emerald-aug flex-shrink-0" />{f}</li>
                 ))}
               </ul>
@@ -196,13 +290,27 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="bg-gradient-to-b from-gold/10 to-gold/5 border-2 border-gold/40 rounded-2xl p-8 text-left relative gold-glow">
+            <div className="bg-gradient-to-b from-emerald-aug/10 to-emerald-aug/5 border-2 border-emerald-aug/40 rounded-2xl p-8 text-left relative">
               <div className="absolute -top-3 right-6 px-3 py-1 bg-emerald-aug rounded-full text-obsidian text-xs font-bold uppercase tracking-widest">Popular</div>
+              <div className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-2">Growth</div>
+              <div className="font-display text-3xl font-bold text-white mb-1">$49<span className="text-lg text-slate-aug font-normal">/mo</span></div>
+              <p className="text-sm text-slate-aug mb-4">Execute actions directly</p>
+              <ul className="space-y-2 mb-6">
+                {['Everything in Solo Dev', 'Action Execution', '2 team seats', 'Outcome tracking + ROI'].map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm text-slate-aug"><Check className="w-4 h-4 text-emerald-aug flex-shrink-0" />{f}</li>
+                ))}
+              </ul>
+              <Link href="/pricing?plan=growth" className="block text-center py-3 rounded-xl bg-emerald-aug text-obsidian font-bold text-sm hover:opacity-90 transition-all">
+                Start Growth
+              </Link>
+            </div>
+
+            <div className="bg-gradient-to-b from-gold/10 to-gold/5 border-2 border-gold/40 rounded-2xl p-8 text-left relative gold-glow">
               <div className="text-xs font-mono uppercase tracking-widest text-slate-aug mb-2">Enterprise</div>
               <div className="font-display text-3xl font-bold text-white mb-1">$99<span className="text-lg text-slate-aug font-normal">/mo</span></div>
-              <p className="text-sm text-slate-aug mb-4">For growing SaaS teams</p>
+              <p className="text-sm text-slate-aug mb-4">Scale with GLM-5 AI</p>
               <ul className="space-y-2 mb-6">
-                {['Everything in Solo Dev', 'Unlimited MAX prompts', '10 Stripe accounts', 'Priority AI + Team seats'].map(f => (
+                {['Everything in Growth', 'Unlimited MAX prompts', '10 Stripe accounts', 'Priority AI (GLM-5)'].map(f => (
                   <li key={f} className="flex items-center gap-2 text-sm text-slate-aug"><Check className="w-4 h-4 text-emerald-aug flex-shrink-0" />{f}</li>
                 ))}
               </ul>
@@ -229,7 +337,9 @@ export default function HomePage() {
           </div>
           <p className="text-slate-aug text-sm font-mono">Financial OS for AI builders &copy; 2026</p>
           <div className="flex gap-6 text-sm text-slate-aug">
+            <Link href="/reports" className="hover:text-white transition-colors">Research</Link>
             <Link href="/privacy" className="hover:text-white transition-colors">Privacy</Link>
+            <Link href="/security" className="hover:text-white transition-colors">Security</Link>
             <Link href="/terms" className="hover:text-white transition-colors">Terms</Link>
             <Link href="mailto:hello@lucrum.app" className="hover:text-white transition-colors">Contact</Link>
           </div>

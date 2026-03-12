@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import PDFDocument from 'pdfkit'
-import { getStripeKeyFromCookies } from '@/lib/stripe'
+import { auth } from '@clerk/nextjs/server'
+import { hasStripeConnected } from '@/lib/stripe-connection'
 import { estimateTax } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -14,9 +15,18 @@ function money(n: number, currency = 'USD') {
 }
 
 export async function GET(req: NextRequest) {
-  const secretKey = getStripeKeyFromCookies(req.cookies)
-  if (!secretKey) {
-    return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
+  const { userId } = await auth()
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  
+  const connected = await hasStripeConnected(userId)
+  if (!connected) {
+    return NextResponse.json({ 
+      error: 'Stripe not connected',
+      action: 'connect',
+      connectUrl: '/api/stripe/connect'
+    }, { status: 401 })
   }
 
   const { searchParams } = new URL(req.url)

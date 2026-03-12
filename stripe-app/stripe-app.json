@@ -1,0 +1,36 @@
+{
+  "id": "com.lucrum.stripe-app",
+  "version": "0.0.1",
+  "name": "Lucrum — AI CFO",
+  "icon": "./src/icon.png",
+  "permissions": [
+    "customer_read",
+    "payment_intents_read",
+    "subscriptions_read",
+    "invoices_read"
+  ],
+  "app_backend": {
+    "webhooks": []
+  },
+  "ui_extension": {
+    "views": [
+      {
+        "id": "com.lucrum.stripe-app.app-view",
+        "type": "stripe.dashboard.home.overview",
+        "title": "Lucrum CFO",
+        "src": "src/views/AppView.tsx"
+      },
+      {
+        "id": "com.lucrum.stripe-app.customer-view",
+        "type": "stripe.dashboard.customer.detail.block",
+        "title": "Lucrum Insights",
+        "src": "src/views/InsightsView.tsx"
+      }
+    ],
+    "content_security_policy": {
+      "connect-src": [
+        "https://lucrumcfo.vercel.app"
+      ]
+    }
+  }
+}

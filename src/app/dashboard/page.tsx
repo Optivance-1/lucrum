@@ -22,6 +22,8 @@ import MaxRecommendations from '@/components/MaxRecommendations'
 import ActionModal from '@/components/ActionModal'
 import FiveMoves from '@/components/FiveMoves'
 import PaywallModal from '@/components/PaywallModal'
+import OutcomeDashboard from '@/components/OutcomeDashboard'
+import RevenueLeakPanel from '@/components/RevenueLeakPanel'
 import type { InsightSeverity, ActionCard, Plan } from '@/types'
 
 const INSIGHT_STYLES: Record<InsightSeverity, {
@@ -110,7 +112,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 }
 
 export default function DashboardPage() {
-  const { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
+  const { metrics, insights, outcomes, outcomesLoading, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh } = useStripeData()
   const { plan, features } = useUserPlan()
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiResponse, setAiResponse] = useState('')
@@ -122,11 +124,11 @@ export default function DashboardPage() {
   const [paywallOpen, setPaywallOpen] = useState(false)
   const [paywallTrigger, setPaywallTrigger] = useState<'demo_exhausted' | 'feature_locked'>('feature_locked')
   const [paywallFeature, setPaywallFeature] = useState<string | undefined>()
-  const [paywallPlan, setPaywallPlan] = useState<'solo' | 'enterprise'>('solo')
+  const [paywallPlan, setPaywallPlan] = useState<'solo' | 'growth' | 'enterprise'>('solo')
   const [lastMaxAnswer, setLastMaxAnswer] = useState<string>('')
   const [demoQuestionUsed, setDemoQuestionUsed] = useState(false)
 
-  const openFeatureLock = useCallback((feature: string, requiredPlan: 'solo' | 'enterprise') => {
+  const openFeatureLock = useCallback((feature: string, requiredPlan: 'solo' | 'growth' | 'enterprise') => {
     setPaywallTrigger('feature_locked')
     setPaywallFeature(feature)
     setPaywallPlan(requiredPlan)
@@ -192,6 +194,12 @@ export default function DashboardPage() {
       loading={loading}
       onRefresh={refresh}
     >
+        {/* 1. Outcome Dashboard — ROI first */}
+        {!isDemo && <OutcomeDashboard outcomes={outcomes} loading={outcomesLoading} />}
+
+        {/* 2. Revenue Leak Panel — NEW */}
+        {!isDemo && <RevenueLeakPanel plan={plan} onFeatureLock={openFeatureLock} />}
+
         {/* Demo / upgrade banner */}
         {isDemo && (
           <div className="glass gold-border rounded-2xl p-5 mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 gold-glow">
@@ -217,10 +225,10 @@ export default function DashboardPage() {
           <div className="glass gold-border rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-mono uppercase tracking-widest text-emerald-aug mb-0.5">Solo Dev</p>
-              <p className="text-sm text-white">Need unlimited MAX prompts or multiple Stripe accounts? Upgrade to Enterprise.</p>
+              <p className="text-sm text-white">Upgrade to Growth for Action Execution, or Enterprise for unlimited prompts + 10 accounts.</p>
             </div>
             <Link
-              href="/pricing?plan=enterprise"
+              href="/pricing?plan=growth"
               className="px-4 py-2 rounded-xl bg-gold/10 border border-gold/20 text-gold hover:bg-gold/20 transition-all text-sm font-semibold whitespace-nowrap"
             >
               Upgrade
@@ -378,7 +386,7 @@ export default function DashboardPage() {
               <div className="flex gap-2">
                 <input
                   type="text" value={aiQuestion} onChange={e => setAiQuestion(e.target.value)}
-                  placeholder={isDemo && demoQuestionUsed ? 'Upgrade to ask more questions...' : 'Should I raise prices? When do I hit $10k MRR?'}
+                  placeholder={isDemo && demoQuestionUsed ? 'Upgrade to ask more questions...' : 'Ask MAX anything or give a command...'}
                   disabled={isDemo && demoQuestionUsed}
                   className="flex-1 bg-obsidian-100 border border-[rgba(201,168,76,0.15)] rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-aug/40 focus:outline-none focus:border-gold/40 transition-all disabled:opacity-40"
                   onKeyDown={e => e.key === 'Enter' && askAI(aiQuestion)}
@@ -436,8 +444,9 @@ export default function DashboardPage() {
                 )
               })()}
 
+              {/* Command suggestions */}
               <div className="flex flex-wrap gap-2 mt-3">
-                {['Should I raise my prices?', 'When do I run out of cash?', 'How is my churn trending?'].map(q => (
+                {['recover failed payments', 'raise prices 10%', 'forecast 90-day runway', 'show churn risks'].map(q => (
                   <button
                     key={q}
                     onClick={() => {

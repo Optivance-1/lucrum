@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { StripeMetrics, AIInsight, CFOContext } from '@/types'
+import type { StripeMetrics, AIInsight, CFOContext, AggregateOutcomes } from '@/types'
 
 interface UseStripeDataReturn {
   metrics: StripeMetrics | null
   insights: AIInsight[]
+  outcomes: AggregateOutcomes | null
+  outcomesLoading: boolean
   loading: boolean
   insightsLoading: boolean
   error: string | null
@@ -22,6 +24,8 @@ const STRIPE_DEMO_URL = '/api/stripe/data?demo=1'
 export function useStripeData(): UseStripeDataReturn {
   const [metrics, setMetrics]           = useState<StripeMetrics | null>(null)
   const [insights, setInsights]         = useState<AIInsight[]>([])
+  const [outcomes, setOutcomes]         = useState<AggregateOutcomes | null>(null)
+  const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [loading, setLoading]           = useState(true)
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [error, setError]               = useState<string | null>(null)
@@ -127,6 +131,13 @@ export function useStripeData(): UseStripeDataReturn {
         failedPaymentsCount: data.failedPaymentsCount,
       }
       fetchInsights(ctx)
+
+      setOutcomesLoading(true)
+      fetch('/api/outcomes')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setOutcomes(data) })
+        .catch(() => {})
+        .finally(() => setOutcomesLoading(false))
     } catch (err: any) {
       setError(err.message ?? 'Failed to load Stripe data')
     } finally {
@@ -176,5 +187,5 @@ export function useStripeData(): UseStripeDataReturn {
     await fetchMetrics()
   }, [fetchMetrics])
 
-  return { metrics, insights, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh }
+  return { metrics, insights, outcomes, outcomesLoading, loading, insightsLoading, error, isDemoData, lastRefreshed, refresh }
 }

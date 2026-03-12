@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { callHeavyAI } from '@/lib/ai-client'
-import { getStripeKeyFromCookies, createStripeClient } from '@/lib/stripe'
+import { getStripeClient } from '@/lib/stripe-connection'
 
 type PreviewBody = {
   actionType: string
@@ -21,8 +21,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'actionType required' }, { status: 400 })
   }
 
-  const stripeKey = getStripeKeyFromCookies(req.cookies, userId)
-  const stripe = stripeKey ? createStripeClient(stripeKey) : null
+  const stripe = await getStripeClient(userId)
 
   let preview: Record<string, any> = {}
 

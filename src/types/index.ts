@@ -1,6 +1,6 @@
 // ─── Plan & Billing ────────────────────────────────────────────────────────
 
-export type Plan = 'demo' | 'solo' | 'enterprise'
+export type Plan = 'demo' | 'solo' | 'growth' | 'enterprise'
 export type BillingInterval = 'month' | 'year'
 
 export interface Subscription {
@@ -429,4 +429,241 @@ export interface AffiliateProduct {
   }
   maxRecommendationContext: string
   priority: number
+}
+
+// ─── Outcome Tracking ───────────────────────────────────────────────────────
+
+export type OutcomeCategory =
+  | 'payment_recovered'
+  | 'churn_prevented'
+  | 'revenue_expanded'
+  | 'runway_extended'
+  | 'invoice_collected'
+  | 'payment_failed'
+  | 'email_sent'
+
+export interface OutcomeRecord {
+  id: string
+  userId: string
+  actionType: string
+  executedAt: number
+
+  expectedImpact: number
+  actualImpact?: number
+  confirmedAt?: number
+
+  outcome?: 'success' | 'partial' | 'failed' | 'pending'
+
+  stripeObjectId?: string
+  stripeObjectType?: string
+  stripeVerifiedAt?: number
+
+  category: OutcomeCategory
+  anonymizedForBenchmarks: boolean
+}
+
+export interface OutcomeSummary {
+  paymentRecovered: number
+  churnPrevented: number
+  revenueExpanded: number
+  actionsExecuted: number
+  totalImpact: number
+}
+
+export interface AggregateOutcomes {
+  totalPaymentRecovered: number
+  totalChurnPrevented: number
+  totalRunwayExtended: number
+  totalRevenueExpanded: number
+  activeUsersThisMonth: number
+  actionsExecutedThisMonth: number
+
+  userPaymentRecovered: number
+  userChurnPrevented: number
+  userRunwayExtended: number
+  userRevenueExpanded: number
+  userActionsExecuted: number
+  userValueGenerated: number
+
+  thisMonth: OutcomeSummary
+  thisQuarter: OutcomeSummary
+  allTime: OutcomeSummary
+
+  computedAt: number
+}
+
+// ─── Natural Language Commands ──────────────────────────────────────────────
+
+export type CommandIntent =
+  | 'price_change'
+  | 'recover_payments'
+  | 'churn_recovery'
+  | 'runway_forecast'
+  | 'apply_discount'
+  | 'cancel_customer'
+  | 'pause_customer'
+  | 'expand_customer'
+  | 'analyze_segment'
+  | 'unknown'
+
+export interface ParsedCommand {
+  intent: CommandIntent
+  params: Record<string, any>
+  confidence: number
+  requiresSimulation: boolean
+  requiresConfirmation: boolean
+  isDestructive: boolean
+  rawInput: string
+}
+
+export interface CommandResult {
+  success: boolean
+  simulationResult?: SimulationResult
+  executionResult?: any
+  affectedCount?: number
+  estimatedImpact?: number
+  message: string
+  actionsLog: string[]
+  requiresUserConfirmation?: boolean
+  confirmationPrompt?: string
+}
+
+// ─── Revenue Leak Detection ─────────────────────────────────────────────────
+
+export type LeakCategory =
+  | 'failed_payments'
+  | 'expiring_cards'
+  | 'dunning_risk'
+  | 'paused_subscriptions'
+  | 'cancelled_recoverable'
+  | 'underpriced_segment'
+  | 'expansion_ready'
+  | 'annual_upsell'
+
+export interface RevenueLeak {
+  id: string
+  type: 'leak' | 'opportunity'
+  category: LeakCategory
+  title: string
+  description: string
+  estimatedMRRImpact: number
+  estimatedARRImpact: number
+  affectedCustomers: string[]
+  affectedCount: number
+  priority: number
+  actionType: string
+  actionParams: Record<string, any>
+  detectedAt: number
+  autoFixAvailable: boolean
+  autoFixDescription: string
+}
+
+// ─── Benchmark Dataset ──────────────────────────────────────────────────────
+
+export interface AnonymizedDataPoint {
+  mrrBand: string
+  ageBand: string
+  churnBand: string
+  planType: string
+
+  actionType: string
+  actionContext: {
+    runwayAtDecision: number
+    churnAtDecision: number
+    growthAtDecision: number
+    mrrAtDecision: number
+  }
+
+  outcome: {
+    mrrChange: number
+    churnChange: number
+    runwayChange: number
+    success: boolean
+  }
+
+  simulationPredictedImpact: number
+  actualImpact: number
+  predictionError: number
+
+  recordedAt: number
+  dataVersion: string
+}
+
+export interface DatasetStats {
+  totalDataPoints: number
+  actionTypeDistribution: Record<string, number>
+  averageOutcomeByAction: Record<string, number>
+  predictionAccuracy: number
+  topPerformingActions: string[]
+  worstPerformingActions: string[]
+  lastUpdated: number
+}
+
+export interface PersonalizedBenchmark {
+  peersInMRRBand: number
+  yourChurnVsPeers: string
+  yourGrowthVsPeers: string
+  bestActionForYourProfile: string
+  successRateForAction: number
+  dataPointsUsed: number
+}
+
+// ─── Data Reports ────────────────────────────────────────────────────────────
+
+export interface ReportData {
+  title: string
+  subtitle: string
+  publishedAt: number
+  dataPointsUsed: number
+  businessesIncluded: number
+  keyFindings: Finding[]
+  methodology: string
+  limitations: string
+  nextReportDate: string
+}
+
+export interface Finding {
+  headline: string
+  detail: string
+  dataPoints: number
+  confidence: 'high' | 'medium' | 'low'
+  chartData?: any
+}
+
+// ─── Stripe App ──────────────────────────────────────────────────────────────
+
+export interface StripeAppSummary {
+  connected: boolean
+  mrr?: number
+  runway?: number
+  churnRate?: number
+  topMove?: {
+    title: string
+    summary: string
+    risk: string
+    riskColor: string
+  }
+  leakCount?: number
+  leakValue?: number
+  connectUrl: string
+}
+
+export interface StripeAppCustomerInsight {
+  customerId: string
+  churnRisk: 'low' | 'medium' | 'high'
+  mrrContribution: number
+  daysAsCustomer: number
+  recommendedAction: string
+  lastPaymentStatus: string
+}
+
+// ─── Email Sequences ─────────────────────────────────────────────────────────
+
+export interface EmailSequenceJob {
+  userId: string
+  email: string
+  day: number
+  scheduledAt: number
+  sentAt?: number
+  status: 'pending' | 'sent' | 'failed'
 }

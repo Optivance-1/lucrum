@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
+import { getStripeClient, canExecuteActions, needsScopeUpgrade, getStripeConnection } from '@/lib/stripe-connection'
 import { writeAuditEntry, updateAuditEntry } from '@/lib/audit-log'
+import { recordOutcome } from '@/lib/outcome-tracker'
 import { callHeavyAI } from '@/lib/ai-client'
 import { safeKvGet, safeKvSet } from '@/lib/kv'
 import { getUserPlan, canUseActionExecution } from '@/lib/subscription'
+import { recordDataPoint } from '@/lib/benchmark-dataset'
+import type { OutcomeCategory, CFOContext, StripeMetrics } from '@/types'
 
 const DESTRUCTIVE_ACTIONS = new Set(['cancel_subscription', 'pause_subscription', 'trigger_payout', 'update_price'])
 
@@ -52,9 +55,9 @@ export async function POST(req: NextRequest) {
   const plan = await getUserPlan(userId)
   if (!canUseActionExecution(plan)) {
     return NextResponse.json({
-      error: 'Action Execution requires a paid plan',
+      error: 'Action Execution requires a Growth or Enterprise plan',
       paywallRequired: true,
-      requiredPlan: 'solo',
+      requiredPlan: 'growth',
     }, { status: 403 })
   }
 
@@ -74,12 +77,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: rateLimitMsg }, { status: 429 })
   }
 
-  const stripeKey = getStripeKeyFromCookies(req.cookies, userId)
-  if (!stripeKey) {
-    return NextResponse.json({ error: 'Stripe not connected' }, { status: 401 })
+  const canExecute = await canExecuteActions(userId)
+  if (!canExecute) {
+    const needsUpgrade = await needsScopeUpgrade(userId)
+    if (needsUpgrade) {
+      return NextResponse.json({
+        error: 'scope_upgrade_required',
+        message: 'Please reconnect Stripe to enable action execution.',
+        reconnectUrl: '/api/stripe/connect?plan=enterprise&upgrade=true'
+      }, { status: 403 })
+    }
   }
 
-  const stripe = createStripeClient(stripeKey)
+  const stripe = await getStripeClient(userId)
+  if (!stripe) {
+    return NextResponse.json({ 
+      error: 'Stripe not connected',
+      action: 'connect',
+      connectUrl: '/api/stripe/connect'
+    }, { status: 401 })
+  }
   const executedAt = new Date().toISOString()
 
   const pendingEntry = await writeAuditEntry({
@@ -273,6 +290,81 @@ export async function POST(req: NextRequest) {
     stripeRequestId: result.stripeRequestId,
     errorMessage: success ? undefined : result.error,
   })
+
+  if (success) {
+    try {
+      let expectedImpact = 0
+      let category: OutcomeCategory = 'email_sent'
+      let stripeObjectId: string | undefined
+      let stripeObjectType: string | undefined
+
+      switch (actionType) {
+        case 'retry_payment':
+          expectedImpact = revenueImpact ?? 0
+          category = 'payment_recovered'
+          stripeObjectId = result.invoiceId ?? params.invoiceId
+          stripeObjectType = 'invoice'
+          break
+        case 'send_email':
+          expectedImpact = (params.customerMRR ?? 50) * 12 * 0.32
+          category = 'churn_prevented'
+          stripeObjectId = params.customerId
+          stripeObjectType = 'customer'
+          break
+        case 'apply_coupon':
+          expectedImpact = (params.customerMRR ?? 50) * 12 * 0.55
+          category = 'churn_prevented'
+          stripeObjectId = result.couponId
+          stripeObjectType = 'subscription'
+          break
+        case 'cancel_subscription':
+          expectedImpact = -(params.subscriptionMRR ?? 0) * 12
+          category = 'churn_prevented'
+          stripeObjectId = params.subscriptionId
+          stripeObjectType = 'subscription'
+          break
+        case 'trigger_payout':
+          expectedImpact = params.amount ?? 0
+          category = 'runway_extended'
+          stripeObjectId = result.payoutId
+          stripeObjectType = 'payout'
+          break
+        case 'create_invoice':
+          expectedImpact = params.amount ?? 0
+          category = 'invoice_collected'
+          stripeObjectId = result.invoiceId
+          stripeObjectType = 'invoice'
+          break
+      }
+
+      const outcomeRecord = await recordOutcome(userId, actionType, expectedImpact, category, stripeObjectId, stripeObjectType)
+
+      // Record anonymized data point for benchmark dataset (fire and forget)
+      const metricsCache = await safeKvGet<StripeMetrics>(`metrics:${userId}`)
+      if (metricsCache) {
+        const contextAtDecision: Partial<CFOContext> = {
+          mrr: metricsCache.mrr,
+          mrrGrowth: metricsCache.mrrGrowth,
+          churnRate: metricsCache.churnRate,
+          runway: metricsCache.runway,
+          availableBalance: metricsCache.availableBalance,
+          activeSubscriptions: metricsCache.activeSubscriptions,
+          accountAgeDays: metricsCache.accountAgeDays,
+          estimatedMonthlyBurn: metricsCache.estimatedMonthlyBurn,
+        }
+        
+        recordDataPoint(
+          userId,
+          actionType,
+          contextAtDecision,
+          metricsCache.simulation ?? null,
+          outcomeRecord
+        ).catch(err => console.error('[actions/execute] dataset recording failed:', err))
+      }
+    } catch (err) {
+      console.error('[actions/execute] outcome recording failed:', err)
+    }
+  }
 
   return NextResponse.json({ success, result, revenueImpact, affectedCustomers })
 }

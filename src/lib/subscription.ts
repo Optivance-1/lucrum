@@ -87,15 +87,15 @@ export async function getUserBillingCustomerId(userId: string): Promise<string |
 // ─── Feature gates ─────────────────────────────────────────────────────────
 
 export function canUseCFOChat(plan: Plan): boolean {
-  return plan === 'solo' || plan === 'enterprise'
+  return plan === 'solo' || plan === 'growth' || plan === 'enterprise'
 }
 
 export function canUseFiveMoves(plan: Plan): boolean {
-  return plan === 'solo' || plan === 'enterprise'
+  return plan === 'solo' || plan === 'growth' || plan === 'enterprise'
 }
 
 export function canUseActionExecution(plan: Plan): boolean {
-  return plan === 'solo' || plan === 'enterprise'
+  return plan === 'growth' || plan === 'enterprise'
 }
 
 export function canUseMultiAccount(plan: Plan): boolean {
@@ -111,7 +111,14 @@ export function usesPriorityAI(plan: Plan): boolean {
 }
 
 export function canUseWebhookAlerts(plan: Plan): boolean {
-  return plan === 'solo' || plan === 'enterprise'
+  return plan === 'solo' || plan === 'growth' || plan === 'enterprise'
+}
+
+export function getTeamSeats(plan: Plan): number {
+  if (plan === 'enterprise') return 5
+  if (plan === 'growth') return 2
+  if (plan === 'solo') return 1
+  return 0
 }
 
 // ─── Demo question tracking ────────────────────────────────────────────────
@@ -142,6 +149,11 @@ const SOLO_PRICE_IDS = new Set([
   process.env.LUCRUM_PRO_ANNUAL_PRICE_ID,
 ].filter(Boolean))
 
+const GROWTH_PRICE_IDS = new Set([
+  process.env.LUCRUM_GROWTH_MONTHLY_PRICE_ID,
+  process.env.LUCRUM_GROWTH_ANNUAL_PRICE_ID,
+].filter(Boolean))
+
 const ENTERPRISE_PRICE_IDS = new Set([
   process.env.LUCRUM_ENTERPRISE_MONTHLY_PRICE_ID,
   process.env.LUCRUM_ENTERPRISE_ANNUAL_PRICE_ID,
@@ -150,12 +162,14 @@ const ENTERPRISE_PRICE_IDS = new Set([
 const ANNUAL_PRICE_IDS = new Set([
   process.env.LUCRUM_SOLO_ANNUAL_PRICE_ID,
   process.env.LUCRUM_PRO_ANNUAL_PRICE_ID,
+  process.env.LUCRUM_GROWTH_ANNUAL_PRICE_ID,
   process.env.LUCRUM_ENTERPRISE_ANNUAL_PRICE_ID,
 ].filter(Boolean))
 
 export function resolvePlanFromPriceId(priceId: string | null | undefined): Plan | null {
   if (!priceId) return null
   if (ENTERPRISE_PRICE_IDS.has(priceId)) return 'enterprise'
+  if (GROWTH_PRICE_IDS.has(priceId)) return 'growth'
   if (SOLO_PRICE_IDS.has(priceId)) return 'solo'
   return null
 }
@@ -169,6 +183,8 @@ export function getValidPriceIds(): string[] {
   return [
     process.env.LUCRUM_SOLO_MONTHLY_PRICE_ID,
     process.env.LUCRUM_SOLO_ANNUAL_PRICE_ID,
+    process.env.LUCRUM_GROWTH_MONTHLY_PRICE_ID,
+    process.env.LUCRUM_GROWTH_ANNUAL_PRICE_ID,
     process.env.LUCRUM_ENTERPRISE_MONTHLY_PRICE_ID,
     process.env.LUCRUM_ENTERPRISE_ANNUAL_PRICE_ID,
     process.env.LUCRUM_PRO_PRICE_ID,

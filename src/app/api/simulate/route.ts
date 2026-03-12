@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
-import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
+import { auth } from '@clerk/nextjs/server'
+import { getStripeClient } from '@/lib/stripe-connection'
 import {
   calculateStdDev,
   deriveGrowthVolatility,
@@ -247,8 +248,7 @@ Respond as strict JSON only:
   return fallback
 }
 
-async function buildBaseline(secretKey: string): Promise<SimulationBaseline> {
-  const stripe = createStripeClient(secretKey)
+async function buildBaseline(stripe: any): Promise<SimulationBaseline> {
   const now = Math.floor(Date.now() / 1000)
   const d90 = now - 90 * 86400
   const d365 = now - 365 * 86400
@@ -377,8 +377,8 @@ async function buildBaseline(secretKey: string): Promise<SimulationBaseline> {
   const avgRevenuePerSubscription =
     activeSubs.length > 0 ? currentMrr / activeSubs.length : Math.max(1, monthlyRevenueMean / 10)
 
-  const availableBalance = balance.available.reduce((sum, b) => sum + b.amount, 0) / 100
-  const pendingBalance = balance.pending.reduce((sum, b) => sum + b.amount, 0) / 100
+  const availableBalance = balance.available.reduce((sum: number, b: any) => sum + b.amount, 0) / 100
+  const pendingBalance = balance.pending.reduce((sum: number, b: any) => sum + b.amount, 0) / 100
   const liquidity = availableBalance + pendingBalance * 0.5
 
   return {
@@ -398,10 +398,16 @@ async function buildBaseline(secretKey: string): Promise<SimulationBaseline> {
 
 export async function POST(req: NextRequest) {
   try {
-    const secretKey = getStripeKeyFromCookies(req.cookies)
+    const { userId } = await auth()
     const demoMode = isDemoModeEnabled(req.nextUrl.searchParams.get('demo'))
-    if (!secretKey && !demoMode) {
-      return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
+    
+    const stripe = userId ? await getStripeClient(userId) : null
+    if (!stripe && !demoMode) {
+      return NextResponse.json({ 
+        error: 'Stripe not connected',
+        action: 'connect',
+        connectUrl: '/api/stripe/connect'
+      }, { status: 401 })
     }
 
     const body = (await req.json().catch(() => ({}))) as SimulateRequestBody
@@ -409,8 +415,8 @@ export async function POST(req: NextRequest) {
     const iterations = Number.isFinite(body.iterations) ? body.iterations : 10000
     const months = Number.isFinite(body.months) ? body.months : 18
 
-    const baseline = secretKey
-      ? await buildBaseline(secretKey)
+    const baseline = stripe
+      ? await buildBaseline(stripe)
       : createMockSimulationBaseline()
     const parsedScenario = parseScenario(scenarioText)
     const simulation = runMonteCarlo(baseline, parsedScenario, {

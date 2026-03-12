@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import type { CFOContext } from '@/types'
-import { callChatAI, callHeavyAI } from '@/lib/ai-client'
+import type { CFOContext, StripeMetrics, StripeCustomer } from '@/types'
+import { callChatAI, callHeavyAI, callGLM5AI } from '@/lib/ai-client'
 import {
   getUserPlan,
   getDemoQuestionsUsed,
@@ -11,6 +11,9 @@ import {
 } from '@/lib/subscription'
 import { getEligibleAffiliates } from '@/lib/affiliates'
 import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { parseCommand, isLikelyCommand } from '@/lib/command-parser'
+import { executeCommand } from '@/lib/command-executor'
+import { getStripeClient } from '@/lib/stripe-connection'
 
 function fmtNumber(value: number | undefined, suffix = ''): string {
   if (value == null || Number.isNaN(value)) return 'unknown'
@@ -44,9 +47,13 @@ export async function POST(req: NextRequest) {
   const payload = await req.json().catch(() => ({})) as {
     question?: string
     context?: Partial<CFOContext>
+    metrics?: StripeMetrics
+    customers?: StripeCustomer[]
+    confirmed?: boolean
   }
   const question = payload.question ?? ''
   const context = payload.context
+  const confirmed = payload.confirmed ?? false
 
   try {
     if (!question?.trim()) {
@@ -54,6 +61,45 @@ export async function POST(req: NextRequest) {
     }
 
     const ctx = context ?? {}
+
+    // Command detection: check if this looks like a command and try to parse it
+    if (userId && isLikelyCommand(question)) {
+      const plan = await getUserPlan(userId)
+      if (plan !== 'demo') {
+        const parsedCommand = await parseCommand(question, ctx)
+        
+        if (parsedCommand.confidence > 0.7 && parsedCommand.intent !== 'unknown') {
+          const stripeClient = await getStripeClient(userId)
+          
+          if (stripeClient) {
+            const metrics = payload.metrics ?? await safeKvGet<StripeMetrics>(`metrics:${userId}`) ?? {} as StripeMetrics
+            const customers = payload.customers ?? await safeKvGet<StripeCustomer[]>(`customers:${userId}`) ?? []
+            
+            const result = await executeCommand(
+              parsedCommand,
+              metrics,
+              customers,
+              userId,
+              stripeClient
+            )
+            
+            // Format command result as chat response
+            const commandResponse = {
+              answer: result.message,
+              provider: 'lucrum-command',
+              plan,
+              isCommand: true,
+              commandIntent: parsedCommand.intent,
+              commandResult: result,
+              requiresConfirmation: result.requiresUserConfirmation,
+              confirmationPrompt: result.confirmationPrompt,
+            }
+            
+            return NextResponse.json(commandResponse)
+          }
+        }
+      }
+    }
 
     // ── Unauthenticated demo user ──────────────────────────────
     if (!userId) {
@@ -103,8 +149,8 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Solo: 5 prompts/day, Enterprise: unlimited
-    if (plan === 'solo') {
+    // Solo/Growth: 5 prompts/day, Enterprise: unlimited
+    if (plan === 'solo' || plan === 'growth') {
       const day = new Date().toISOString().slice(0, 10)
       const rateKey = `cfo_rate:${userId}:${day}`
       const count = (await safeKvGet<number>(rateKey)) ?? 0
@@ -119,8 +165,9 @@ export async function POST(req: NextRequest) {
       await safeKvSet(rateKey, count + 1, 172800)
     }
 
-    const aiCall = usesPriorityAI(plan) ? callHeavyAI : callChatAI
-    const answer = await aiCall(buildSystemPrompt(ctx), question)
+    const aiCall = usesPriorityAI(plan) ? callGLM5AI : callChatAI
+    const systemPrompt = usesPriorityAI(plan) ? buildEnterpriseSystemPrompt(ctx) : buildSystemPrompt(ctx)
+    const answer = await aiCall(systemPrompt, question)
 
     return NextResponse.json({ answer, provider: 'lucrum-ai', plan })
   } catch (error: any) {
@@ -201,4 +248,20 @@ When you recommend a specific Stripe action the user can take, include an action
 {"actionType":"retry_payment|send_email|apply_coupon|pause_subscription|cancel_subscription|create_coupon|trigger_payout|update_price","title":"Short action title","params":{}}
 \`\`\`
 Only include action blocks for concrete, executable actions. Max 1 per response.${affiliateSection}`
+}
+
+function buildEnterpriseSystemPrompt(ctx: Partial<CFOContext>): string {
+  const base = buildSystemPrompt(ctx)
+  return `${base}
+
+ADVANCED ANALYSIS CAPABILITY:
+You have access to 50,000 Monte Carlo simulation results, decision scoring across 8 action types, and full customer cohort data. Do not give surface-level advice. Go deep. Identify second-order effects. When a founder asks about churn — also consider what that churn rate implies about product-market fit, pricing elasticity, and which customer segment is leaving. Connect the dots between metrics that most CFOs miss. You are not a chatbot. You are a strategic operator.
+
+ENTERPRISE DEEP ANALYSIS MODE:
+You are running on GLM-5, a 744B parameter model. Use your full reasoning capacity.
+When a founder asks any question:
+1. Answer directly in the first sentence
+2. Give the second-order implication in sentence 2
+3. Give one specific number they should track
+4. If action is warranted, include an action block`
 }

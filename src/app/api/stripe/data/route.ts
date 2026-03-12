@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createStripeClient, getStripeKeyFromCookies } from '@/lib/stripe'
+import { getStripeClient } from '@/lib/stripe-connection'
 import { calculateChurnRate, calculateMRRGrowth, calculateRunway, getLastNDays } from '@/lib/utils'
 import { createMockStripeMetrics, isDemoModeEnabled } from '@/lib/mockData'
 import { saveSnapshot } from '@/lib/snapshots'
@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const secretKey = getStripeKeyFromCookies(req.cookies, userId)
-    if (!secretKey) {
+    const stripe = await getStripeClient(userId)
+    if (!stripe) {
       if (isDemoModeEnabled(req.nextUrl.searchParams.get('demo'))) {
         return NextResponse.json(createMockStripeMetrics(), {
           headers: {
@@ -30,10 +30,12 @@ export async function GET(req: NextRequest) {
           },
         })
       }
-      return NextResponse.json({ error: 'Not connected to Stripe' }, { status: 401 })
+      return NextResponse.json({ 
+        error: 'Stripe not connected',
+        action: 'connect',
+        connectUrl: '/api/stripe/connect'
+      }, { status: 401 })
     }
-
-    const stripe = createStripeClient(secretKey)
     const now = Math.floor(Date.now() / 1000)
     const d30 = now - 30 * 86400
     const d60 = now - 60 * 86400
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest) {
     async function fetchBalanceTx(created: { gte: number; lte?: number }, maxItems = 2000) {
       return fetchAll(
         (startingAfter) =>
-          stripe.balanceTransactions.list({
+          stripe!.balanceTransactions.list({
             created,
             limit: 100,
             ...(startingAfter ? { starting_after: startingAfter } : {}),

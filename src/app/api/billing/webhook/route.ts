@@ -82,7 +82,9 @@ export async function POST(req: NextRequest) {
         })
 
         if (plan === 'enterprise') {
-          await sendEmailToUserId(userId, 'Welcome to Lucrum Enterprise', 'You now have full access to Action Execution, Multi-account, Team Seats, API access, and Priority AI. Connect your Stripe and try the Action Engine today.')
+          await sendEmailToUserId(userId, 'Welcome to Lucrum Enterprise', 'You now have full access to Action Execution, Multi-account, Team Seats, API access, and Priority AI (GLM-5). Connect your Stripe and try the Action Engine today.')
+        } else if (plan === 'growth') {
+          await sendEmailToUserId(userId, 'Welcome to Lucrum Growth', 'You now have full access to Action Execution, 2 team seats, and Outcome Tracking. Connect your Stripe and execute your first action.')
         } else {
           await sendEmailToUserId(userId, 'Welcome to Lucrum Solo Dev', 'You now have full access to MAX CFO, Five Moves Engine, and Metric History. Connect your Stripe and ask MAX your first question.')
         }
