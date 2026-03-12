@@ -7,6 +7,12 @@ import { getOAuthUrl } from '@/lib/stripe-connection'
 import { getUserPlan } from '@/lib/subscription'
 
 export async function GET(req: NextRequest) {
+  const clientId = process.env.LUCRUM_STRIPE_CLIENT_ID
+  
+  if (!clientId || clientId.includes('REPLACE') || !clientId.startsWith('ca_')) {
+    redirect('/connect?error=not_configured')
+  }
+
   const { userId } = await auth()
   
   if (!userId) {
@@ -31,4 +37,12 @@ export async function GET(req: NextRequest) {
   const oauthUrl = getOAuthUrl(plan, state)
 
   redirect(oauthUrl)
+}
+
+export async function POST(req: NextRequest) {
+  return NextResponse.json({
+    configured: !!(process.env.LUCRUM_STRIPE_CLIENT_ID?.startsWith('ca_')),
+    setup_url: 'https://dashboard.stripe.com/settings/connect',
+    callback_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/stripe/callback`,
+  })
 }

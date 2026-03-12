@@ -35,7 +35,10 @@ function ConnectPageContent() {
     expired: 'Session expired. Please try connecting again.',
     invalid: 'Invalid request. Please try again.',
     token_exchange_failed: 'Connection failed. Please try again.',
+    not_configured: 'Stripe Connect is not configured yet.',
   }
+  
+  const isSetupError = error === 'not_configured'
 
   if (!isLoaded || !userId) {
     return (
@@ -77,8 +80,29 @@ function ConnectPageContent() {
             </p>
           </div>
 
+          {/* Setup required state */}
+          {isSetupError && (
+            <div className="mb-6 p-5 rounded-xl bg-gold/10 border border-gold/20">
+              <p className="text-gold font-semibold text-sm mb-3">Developer Setup Required</p>
+              <p className="text-slate-aug text-sm mb-4">
+                To enable Stripe Connect OAuth, you need to configure your Stripe Connect application:
+              </p>
+              <ol className="text-sm text-slate-aug space-y-2 list-decimal list-inside mb-4">
+                <li>Go to <a href="https://dashboard.stripe.com/settings/connect" target="_blank" rel="noopener noreferrer" className="text-gold underline">dashboard.stripe.com/settings/connect</a></li>
+                <li>Create a Connect application (or use existing)</li>
+                <li>Add redirect URI: <code className="text-xs bg-black/30 px-1 rounded">http://localhost:3000/api/stripe/callback</code></li>
+                <li>Copy the <strong>Client ID</strong> (starts with <code className="text-xs bg-black/30 px-1 rounded">ca_</code>)</li>
+                <li>Add to <code className="text-xs bg-black/30 px-1 rounded">.env.local</code>: <code className="text-xs bg-black/30 px-1 rounded">LUCRUM_STRIPE_CLIENT_ID=ca_xxx</code></li>
+                <li>Restart the dev server</li>
+              </ol>
+              <p className="text-xs text-slate-aug/60">
+                This is a one-time setup. Once configured, users will authorize via Stripe&apos;s OAuth flow.
+              </p>
+            </div>
+          )}
+
           {/* Error state */}
-          {error && (
+          {error && !isSetupError && (
             <div className="mb-6 p-4 rounded-xl bg-crimson-aug/10 border border-crimson-aug/20 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-crimson-aug flex-shrink-0 mt-0.5" />
               <div>
