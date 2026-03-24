@@ -17,6 +17,7 @@ const isPublicRoute = createRouteMatcher([
   '/api/comps/scrape',
   '/api/cron/scrape-comps',
   '/api/cron/verify-outcomes',
+  '/api/cron/heartbeat',
   '/api/reports/generate',
   '/api/reports/waitlist',
   '/api/reports(.*)',

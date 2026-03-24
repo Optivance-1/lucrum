@@ -19,7 +19,9 @@ export async function getUserEmail(userId: string): Promise<string | null> {
 
 export async function rememberStripeAccountOwner(accountId: string, userId: string): Promise<void> {
   if (!accountId || !userId) return
-  await safeKvSet(`lucrum:stripe-account-owner:${accountId}`, userId)
+  await safeKvSet(`lucrum:stripe-account-owner:${accountId}`, userId, {
+    ex: 60 * 60 * 24 * 365,
+  })
 }
 
 export async function getStripeAccountOwner(accountId: string): Promise<string | null> {

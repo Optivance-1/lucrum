@@ -3,12 +3,37 @@ import { safeKvGet, safeKvSet } from '@/lib/kv'
 import { callHeavyAI, stripThinking } from '@/lib/ai-client'
 
 const MIN_DATA_POINTS_FOR_REPORT = 50
+const MINIMUM_ACCOUNTS_FOR_BENCHMARK = 50
 
-export async function generateMonthlyReport(month: string): Promise<ReportData | null> {
+export type MonthlyReportResult =
+  | { status: 'insufficient_data'; message: string; data: null }
+  | { status: 'ok'; data: ReportData }
+
+async function getConnectedAccountCount(): Promise<number> {
+  const direct = await safeKvGet<number>('platform:connected_accounts_count')
+  if (typeof direct === 'number' && direct >= 0) return direct
+  const stats = await safeKvGet<DatasetStats>('dataset:stats')
+  return stats?.totalDataPoints ?? 0
+}
+
+export async function generateMonthlyReport(month: string): Promise<MonthlyReportResult> {
+  const accountCount = await getConnectedAccountCount()
+  if (accountCount < MINIMUM_ACCOUNTS_FOR_BENCHMARK) {
+    return {
+      status: 'insufficient_data',
+      message: `Benchmark reports require ${MINIMUM_ACCOUNTS_FOR_BENCHMARK} connected accounts. Currently at ${accountCount}.`,
+      data: null,
+    }
+  }
+
   const stats = await safeKvGet<DatasetStats>('dataset:stats')
   
   if (!stats || stats.totalDataPoints < MIN_DATA_POINTS_FOR_REPORT) {
-    return null
+    return {
+      status: 'insufficient_data',
+      message: `Need at least ${MIN_DATA_POINTS_FOR_REPORT} data points in aggregate statistics.`,
+      data: null,
+    }
   }
 
   const indexKey = 'dataset:index'
@@ -27,7 +52,11 @@ export async function generateMonthlyReport(month: string): Promise<ReportData |
   }
 
   if (dataPoints.length < MIN_DATA_POINTS_FOR_REPORT) {
-    return null
+    return {
+      status: 'insufficient_data',
+      message: `Not enough data points for ${month} in the rolling index.`,
+      data: null,
+    }
   }
 
   const analysis = analyzeDataPoints(dataPoints, stats)
@@ -47,7 +76,7 @@ export async function generateMonthlyReport(month: string): Promise<ReportData |
 
   await safeKvSet(`report:${month}`, report)
 
-  return report
+  return { status: 'ok', data: report }
 }
 
 function analyzeDataPoints(dataPoints: AnonymizedDataPoint[], stats: DatasetStats) {

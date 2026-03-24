@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import Stripe from 'stripe'
 import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 import type {
   OutcomeRecord,
   OutcomeCategory,
@@ -107,7 +108,7 @@ export async function verifyOutcome(
     record.stripeVerifiedAt = Date.now()
     await safeKvSet(key, record, 365 * 86400)
   } catch (err) {
-    console.error(`[outcome-tracker] verify failed for ${outcomeId}:`, err)
+    logger.error('outcome-tracker', `verify failed for ${outcomeId}`, err)
   }
 
   return record

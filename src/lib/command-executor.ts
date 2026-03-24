@@ -11,6 +11,9 @@ import { runSimulation } from '@/lib/monte-carlo'
 import { callHeavyAI } from '@/lib/ai-client'
 import { recordOutcome } from '@/lib/outcome-tracker'
 import { formatCommandHelp } from '@/lib/command-parser'
+import { generateHoldToken, validateHoldToken, consumeHoldToken } from '@/lib/hold-tokens'
+
+const MAX_ACTION_IMPACT_USD = 10_000
 
 function buildSimConfig(
   metrics: StripeMetrics,
@@ -40,16 +43,26 @@ export async function executeCommand(
   metrics: StripeMetrics,
   customers: StripeCustomer[],
   userId: string,
-  stripeClient: Stripe
+  stripeClient: Stripe,
+  options?: { holdToken?: string }
 ): Promise<CommandResult> {
   const actionsLog: string[] = []
+
+  if (process.env.LUCRUM_READ_SUGGEST_ONLY === '1') {
+    return {
+      success: false,
+      message:
+        'Lucrum is in read-only mode (LUCRUM_READ_SUGGEST_ONLY): simulations and suggestions only. Stripe actions are disabled.',
+      actionsLog: ['read_only_mode'],
+    }
+  }
 
   switch (command.intent) {
     case 'price_change':
       return handlePriceChange(command, metrics, actionsLog)
 
     case 'recover_payments':
-      return handleRecoverPayments(stripeClient, userId, actionsLog)
+      return handleRecoverPayments(stripeClient, userId, actionsLog, command, options?.holdToken)
 
     case 'churn_recovery':
       return handleChurnRecovery(metrics, customers, stripeClient, userId, actionsLog)
@@ -129,7 +142,9 @@ ${mrrImpact > 0 ? '✅ Simulations support this move.' : '⚠️ Proceed with ca
 async function handleRecoverPayments(
   stripeClient: Stripe,
   userId: string,
-  actionsLog: string[]
+  actionsLog: string[],
+  command: ParsedCommand,
+  holdToken?: string
 ): Promise<CommandResult> {
   actionsLog.push('Fetching open invoices...')
 
@@ -153,6 +168,21 @@ async function handleRecoverPayments(
 
     const totalAtRisk = retryableInvoices.reduce((sum, inv) => sum + ((inv.amount_due ?? 0) / 100), 0)
     actionsLog.push(`Found ${retryableInvoices.length} retryable invoices worth $${totalAtRisk.toLocaleString()}`)
+
+    if (totalAtRisk > MAX_ACTION_IMPACT_USD) {
+      const ok = await validateHoldToken(userId, holdToken, command)
+      if (!ok) {
+        return {
+          success: false,
+          status: 'hold_required',
+          holdUntil: Date.now() + 48 * 3600 * 1000,
+          holdToken: await generateHoldToken(userId, command),
+          message: `Action estimated at $${totalAtRisk.toLocaleString()}. Reconfirm after 48 hours.`,
+          actionsLog,
+        }
+      }
+      await consumeHoldToken(userId, holdToken)
+    }
 
     let recovered = 0
     let recoveredCount = 0

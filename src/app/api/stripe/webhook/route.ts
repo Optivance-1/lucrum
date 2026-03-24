@@ -9,6 +9,8 @@ import {
   markMetricsInvalidated,
   resolveUserIdFromStripeEventObject,
 } from '@/lib/user-state'
+import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 
 function formatCurrency(amount = 0, currency = 'usd'): string {
   return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`
@@ -40,8 +42,15 @@ export async function POST(req: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET)
   } catch (err: any) {
-    console.error('[webhook] Signature verification failed:', err.message)
+    logger.warn('stripe/webhook', 'Signature verification failed', { message: err.message })
     return NextResponse.json({ error: `Invalid signature: ${err.message}` }, { status: 400 })
+  }
+
+  const cacheKey = `stripe_event:${event.id}`
+  const alreadyHandled = await safeKvGet<boolean>(cacheKey)
+  if (alreadyHandled) {
+    logger.info('stripe/webhook', 'Duplicate event ignored', { eventId: event.id, type: event.type })
+    return NextResponse.json({ received: true, duplicate: true })
   }
 
   try {
@@ -175,13 +184,12 @@ export async function POST(req: NextRequest) {
       }
 
       default:
-        // Not an error — just log unhandled events
         break
     }
   } catch (handlerErr) {
-    console.error('[webhook] Handler error:', handlerErr)
-    // Still return 200 so Stripe doesn't retry
+    logger.error('stripe/webhook', 'Handler error', { error: handlerErr, eventId: event.id, type: event.type })
   }
 
+  await safeKvSet(cacheKey, true, 60 * 60)
   return NextResponse.json({ received: true })
 }

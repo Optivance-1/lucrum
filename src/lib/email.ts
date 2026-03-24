@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import { getUserEmail } from '@/lib/user-state'
+import { logger } from '@/lib/logger'
 
 function getResendClient(): Resend | null {
   if (!process.env.RESEND_API_KEY) return null
@@ -23,7 +24,7 @@ export async function sendEmailToAddress(
     })
     return true
   } catch (error) {
-    console.error('[email] send failed:', error)
+    logger.error('email', 'send failed', error)
     return false
   }
 }

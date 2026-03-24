@@ -13,6 +13,8 @@ import {
   rememberBillingCustomerOwner,
   rememberBillingSubscriptionOwner,
 } from '@/lib/user-state'
+import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 
 async function resolveBillingUserId(object: Record<string, any>): Promise<string | null> {
   if (typeof object.metadata?.userId === 'string') return object.metadata.userId
@@ -53,6 +55,14 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(body, sig, process.env.LUCRUM_STRIPE_WEBHOOK_SECRET)
   } catch (error: any) {
     return NextResponse.json({ error: `Invalid signature: ${error.message}` }, { status: 400 })
+  }
+
+  // Idempotency: avoid processing the same event multiple times
+  const cacheKey = `stripe_billing_event:${event.id}`
+  const alreadyHandled = await safeKvGet<boolean>(cacheKey)
+  if (alreadyHandled) {
+    logger.info('billing/webhook', 'Duplicate event ignored', { eventId: event.id, type: event.type })
+    return NextResponse.json({ received: true, duplicate: true })
   }
 
   try {
@@ -137,8 +147,10 @@ export async function POST(req: NextRequest) {
         break
     }
   } catch (error) {
-    console.error('[billing/webhook] handler error:', error)
+    logger.error('billing/webhook', 'Handler error', { error, eventId: event.id, type: event.type })
   }
+
+  await safeKvSet(cacheKey, true, 60 * 60)
 
   return NextResponse.json({ received: true })
 }

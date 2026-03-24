@@ -1,5 +1,73 @@
+import { safeKvGet, safeKvSet } from '@/lib/kv'
+
 const DEFAULT_TIMEOUT_MS = 10_000
 const GLM5_TIMEOUT_MS = 30_000
+
+export type AiCostOptions = { userId?: string; plan?: string }
+
+function getBillingPeriod(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function estimateCost(model: string, tokensUsed: number): number {
+  return (tokensUsed / 1000) * (model.includes('heavy') || model === 'glm5' ? 0.2 : 0.12)
+}
+
+function capForPlan(plan: string): number {
+  const caps: Record<string, number> = {
+    starter: 1.5,
+    growth: 3.0,
+    pro: 8.0,
+    solo: 1.5,
+    enterprise: 8.0,
+    demo: 1.5,
+  }
+  return caps[plan] ?? 1.5
+}
+
+function nextResetLabel(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() + 1)
+  d.setDate(1)
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+function parseCostRecord(raw: string | null): { cost: number; calls: number } {
+  if (!raw) return { cost: 0, calls: 0 }
+  try {
+    const prev = JSON.parse(raw) as { cost?: number; calls?: number }
+    return {
+      cost: typeof prev.cost === 'number' ? prev.cost : 0,
+      calls: typeof prev.calls === 'number' ? prev.calls : 0,
+    }
+  } catch {
+    return { cost: 0, calls: 0 }
+  }
+}
+
+async function checkAiBudget(userId: string, plan: string): Promise<{ overBudget: boolean; cost: number; cap: number }> {
+  const key = `ai_cost:${userId}:${getBillingPeriod()}`
+  const raw = await safeKvGet<string>(key)
+  const prev = parseCostRecord(raw)
+  const cap = capForPlan(plan)
+  return { overBudget: prev.cost >= cap, cost: prev.cost, cap }
+}
+
+export async function trackAICost(userId: string, plan: string, tokensUsed: number, model: string) {
+  const key = `ai_cost:${userId}:${getBillingPeriod()}`
+  const raw = await safeKvGet<string>(key)
+  const prev = parseCostRecord(raw)
+  const callCost = estimateCost(model, tokensUsed)
+  const updated = { cost: prev.cost + callCost, calls: prev.calls + 1 }
+  await safeKvSet(key, JSON.stringify(updated), { ex: 60 * 60 * 24 * 35 })
+  const cap = capForPlan(plan)
+  return {
+    cost: updated.cost,
+    cap,
+    overBudget: updated.cost >= cap,
+  }
+}
 
 type ChatRole = 'system' | 'user' | 'assistant'
 
@@ -128,7 +196,7 @@ async function callGLM5(
 
   const remaining = res.headers.get('x-ratelimit-remaining-requests')
   if (remaining && parseInt(remaining, 10) < 100) {
-    console.warn(`[glm5] rate limit low: ${remaining} requests remaining`)
+    logFailure('glm5:rate_limit_low', new Error(`Remaining requests: ${remaining}`))
   }
 
   if (!res.ok) throw new Error(`GLM-5 request failed: ${res.status}`)
@@ -298,26 +366,87 @@ async function callAiWithRouting(
     : 'AI analysis temporarily unavailable. Your metrics are still accurate.'
 }
 
-export async function callGLM5AI(system: string | undefined, user: string): Promise<string> {
+export async function callGLM5AI(
+  system: string | undefined,
+  user: string,
+  options?: AiCostOptions
+): Promise<string> {
+  if (options?.userId && options?.plan) {
+    const b = await checkAiBudget(options.userId, options.plan)
+    if (b.overBudget) {
+      return `You've reached your monthly AI query limit. It resets on ${nextResetLabel()}.`
+    }
+  }
   try {
     const result = await callGLM5(system, user)
-    if (result) return result
+    if (result) {
+      if (options?.userId && options?.plan) {
+        const tokens = Math.ceil(((system?.length ?? 0) + user.length + result.length) / 4)
+        await trackAICost(options.userId, options.plan, tokens, 'glm5')
+      }
+      return result
+    }
   } catch (err) {
     logFailure('glm5:direct', err)
   }
-  return callHeavyAI(system, user)
+  return callHeavyAI(system, user, options)
 }
 
-export async function callHeavyAI(system: string | undefined, user: string): Promise<string> {
-  return callAiWithRouting('heavy', system, user)
+export async function callHeavyAI(
+  system: string | undefined,
+  user: string,
+  options?: AiCostOptions
+): Promise<string> {
+  if (options?.userId && options?.plan) {
+    const b = await checkAiBudget(options.userId, options.plan)
+    if (b.overBudget) {
+      return `You've reached your monthly AI query limit. It resets on ${nextResetLabel()}.`
+    }
+  }
+  const out = await callAiWithRouting('heavy', system, user)
+  if (options?.userId && options?.plan && out && !out.startsWith("You've reached")) {
+    const tokens = Math.ceil(((system?.length ?? 0) + user.length + out.length) / 4)
+    await trackAICost(options.userId, options.plan, tokens, 'heavy')
+  }
+  return out
 }
 
-export async function callChatAI(system: string | undefined, user: string): Promise<string> {
-  return callAiWithRouting('chat', system, user)
+export async function callChatAI(
+  system: string | undefined,
+  user: string,
+  options?: AiCostOptions
+): Promise<string> {
+  if (options?.userId && options?.plan) {
+    const b = await checkAiBudget(options.userId, options.plan)
+    if (b.overBudget) {
+      return `You've reached your monthly AI query limit. It resets on ${nextResetLabel()}.`
+    }
+  }
+  const out = await callAiWithRouting('chat', system, user)
+  if (options?.userId && options?.plan && out && !out.startsWith("You've reached")) {
+    const tokens = Math.ceil(((system?.length ?? 0) + user.length + out.length) / 4)
+    await trackAICost(options.userId, options.plan, tokens, 'chat')
+  }
+  return out
 }
 
-export async function callStructuredAI(system: string | undefined, user: string): Promise<string> {
-  return callAiWithRouting('structured', system, user)
+export async function callStructuredAI(
+  system: string | undefined,
+  user: string,
+  options?: AiCostOptions
+): Promise<string> {
+  if (options?.userId && options?.plan) {
+    const b = await checkAiBudget(options.userId, options.plan)
+    if (b.overBudget) {
+      return `You've reached your monthly AI query limit. It resets on ${nextResetLabel()}.`
+    }
+  }
+  const out = await callAiWithRouting('structured', system, user)
+  if (options?.userId && options?.plan && out && !out.startsWith("You've reached")) {
+    const tokens = Math.ceil(((system?.length ?? 0) + user.length + out.length) / 4)
+    await trackAICost(options.userId, options.plan, tokens, 'structured')
+  }
+  return out
 }
 
 export function stripThinking(text: string): string {

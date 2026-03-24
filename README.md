@@ -154,3 +154,13 @@ Before full production:
 3. Add rate limiting on all API routes
 4. Add audit logging around key connect/disconnect events
 5. Use test keys in staging, live keys only in production
+6. Configure monitoring (Sentry/Datadog/etc.) and wire Lucrum's structured logs into your chosen backend.
+
+## Development Workflow
+
+- `npm run lint` — ESLint (Next.js core web vitals rules)
+- `npm test` — Vitest unit tests for core financial logic
+- `npm run test:e2e` — Playwright smoke tests (home, pricing, connect, legal pages, `/api/health`). First run: `npx playwright install chromium`. Uses port **4173** by default so it does not clash with `npm run dev -p 4000`.
+- `npm run format` — Prettier formatting across the repo
+
+GitHub Actions CI under `.github/workflows/ci.yml` runs lint, unit tests, build, and E2E smoke on pushes and pull requests to `main`/`master`.

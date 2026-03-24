@@ -1,7 +1,10 @@
 import type { Metadata } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
 import { Playfair_Display, DM_Sans, DM_Mono } from 'next/font/google'
+import { runStartupChecks } from '@/lib/startup-checks'
 import './globals.css'
+
+runStartupChecks()
 
 const playfair = Playfair_Display({
   subsets: ['latin'],

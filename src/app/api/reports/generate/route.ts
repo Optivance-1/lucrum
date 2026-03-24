@@ -32,14 +32,15 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const report = await generateMonthlyReport(month)
+    const generated = await generateMonthlyReport(month)
 
-    if (!report) {
+    if (generated.status !== 'ok') {
       return NextResponse.json({
         published: false,
-        reason: 'Report generation failed - insufficient data for month',
+        reason: generated.message,
       })
     }
+    const report = generated.data
 
     const isFirstReport = await isFirstPublishedReport()
     if (isFirstReport) {

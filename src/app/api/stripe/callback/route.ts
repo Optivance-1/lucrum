@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redirect } from 'next/navigation'
-import { safeKvGet, safeKvDel } from '@/lib/kv'
+import { safeKvGet, safeKvDel, safeKvSet } from '@/lib/kv'
 import {
   exchangeCodeForToken,
   saveStripeConnection,
@@ -68,6 +68,11 @@ export async function GET(req: NextRequest) {
   )
 
   await rememberStripeAccountOwner(stripe_user_id, userId)
+  await safeKvSet(
+    `lucrum:stripe-account-owner:${stripe_user_id}`,
+    userId,
+    { ex: 60 * 60 * 24 * 365 },
+  )
 
   if (isFirstConnection) {
     try {

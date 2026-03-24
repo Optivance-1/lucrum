@@ -80,7 +80,8 @@ export async function POST(req: NextRequest) {
               metrics,
               customers,
               userId,
-              stripeClient
+              stripeClient,
+              {}
             )
             
             // Format command result as chat response
@@ -167,7 +168,7 @@ export async function POST(req: NextRequest) {
 
     const aiCall = usesPriorityAI(plan) ? callGLM5AI : callChatAI
     const systemPrompt = usesPriorityAI(plan) ? buildEnterpriseSystemPrompt(ctx) : buildSystemPrompt(ctx)
-    const answer = await aiCall(systemPrompt, question)
+    const answer = await aiCall(systemPrompt, question, { userId, plan })
 
     return NextResponse.json({ answer, provider: 'lucrum-ai', plan })
   } catch (error: any) {

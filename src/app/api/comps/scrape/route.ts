@@ -64,30 +64,13 @@ export async function POST(req: NextRequest) {
     })
   )
 
-  try {
-    const twitterPoints = await scrapeTwitter()
-    const twitterResult = await saveCompDataPoints('twitter', twitterPoints)
-    results.twitter = twitterResult
-  } catch (err) {
-    console.error('[comps/scrape] twitter failed:', err)
-    results.twitter = { saved: 0, total: 0 }
-  }
+  console.warn('[comps] Synthetic data source removed. Real ingestion only.')
+  const twitterResult = await saveCompDataPoints('twitter', [])
+  results.twitter = twitterResult
 
   return NextResponse.json({
     ok: true,
     results,
     scrapedAt: new Date().toISOString(),
   })
-}
-
-async function scrapeTwitter(): Promise<Partial<CompDataPoint>[]> {
-  try {
-    const prompt = `Search your knowledge for recent public tweets from SaaS founders sharing their MRR, revenue milestones, or business metrics (e.g. "#buildinpublic", "hit $X MRR"). Generate 5-10 realistic data points based on commonly shared metrics in the build-in-public community. Return ONLY a JSON array with: id (string slug), mrr (number), monthsOld (number), category ("SaaS"|"API"|"tool"|"marketplace"|"other"), churnRate (number|null), growthRateMoM (number|null), teamSize (number|null), notes (string). No markdown.`
-    const raw = await callHeavyAI(undefined, prompt)
-    const clean = raw.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(clean)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
 }

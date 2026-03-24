@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
     context?: Partial<CFOContext>
     metrics?: StripeMetrics
     customers?: StripeCustomer[]
+    holdToken?: string
   }
 
-  const { input, confirmed, context, metrics, customers } = body
+  const { input, confirmed, context, metrics, customers, holdToken } = body
 
   if (!input?.trim()) {
     return NextResponse.json({ error: 'No command provided' }, { status: 400 })
@@ -82,7 +83,8 @@ export async function POST(req: NextRequest) {
         metrics ?? {} as StripeMetrics,
         customers ?? [],
         userId,
-        stripeClient
+        stripeClient,
+        { holdToken }
       )
 
       return NextResponse.json({
@@ -99,7 +101,8 @@ export async function POST(req: NextRequest) {
       metrics ?? {} as StripeMetrics,
       customers ?? [],
       userId,
-      stripeClient
+      stripeClient,
+      { holdToken }
     )
 
     if (result.success && result.estimatedImpact && result.estimatedImpact > 0) {

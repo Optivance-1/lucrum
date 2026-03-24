@@ -1,6 +1,14 @@
 import Stripe from 'stripe'
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
+function getRequiredEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`)
+  }
+  return value
+}
+
 // Pinned API version — used everywhere for consistency
 export const STRIPE_API_VERSION = '2023-10-16' as const
 export const STRIPE_KEY_COOKIE = 'stripe_key'
@@ -8,7 +16,7 @@ export const STRIPE_ACCOUNTS_COOKIE = 'stripe_accounts'
 const ENCRYPTION_PREFIX = 'v1'
 
 // Server-side Stripe instance (uses env key for webhooks & server ops)
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+export const stripe = new Stripe(getRequiredEnv('STRIPE_SECRET_KEY'), {
   apiVersion: STRIPE_API_VERSION,
 })
 
@@ -29,7 +37,12 @@ export function isValidStripeKey(key: string): boolean {
 
 function getCookieEncryptionKey(): Buffer | null {
   const raw = process.env.COOKIE_ENCRYPTION_KEY
-  if (!raw) return null
+  if (!raw) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Missing COOKIE_ENCRYPTION_KEY for secure Stripe key encryption')
+    }
+    return null
+  }
   // Normalize arbitrary-length env secret into a fixed 32-byte key.
   return createHash('sha256').update(raw).digest()
 }

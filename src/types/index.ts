@@ -526,6 +526,9 @@ export interface CommandResult {
   actionsLog: string[]
   requiresUserConfirmation?: boolean
   confirmationPrompt?: string
+  status?: 'hold_required'
+  holdUntil?: number
+  holdToken?: string
 }
 
 // ─── Revenue Leak Detection ─────────────────────────────────────────────────

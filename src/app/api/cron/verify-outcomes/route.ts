@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
 import { safeKvGet } from '@/lib/kv'
 import { verifyOutcome, updatePlatformTotals } from '@/lib/outcome-tracker'
-import { STRIPE_API_VERSION } from '@/lib/stripe'
+import { getStripeClient } from '@/lib/stripe-connection'
 import type { OutcomeRecord } from '@/types'
+import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    logger.warn('cron:verify-outcomes', 'Unauthorized cron attempt', { authHeaderPresent: !!authHeader })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -37,14 +38,16 @@ export async function GET(req: NextRequest) {
       if (record.executedAt > cutoff) continue
 
       try {
-        const stripeKey = await safeKvGet<string>(`outcome_stripe_ref:${userId}`)
-        if (!stripeKey) continue
+        const refRaw = await safeKvGet<string>(`outcome_stripe_ref:${userId}`)
+        if (!refRaw) continue
 
-        const stripe = new Stripe(stripeKey, { apiVersion: STRIPE_API_VERSION })
+        const stripe = await getStripeClient(userId)
+        if (!stripe) continue
+
         await verifyOutcome(userId, outcomeId, stripe)
         verified++
       } catch (err) {
-        console.error(`[verify-outcomes] failed for ${outcomeId}:`, err)
+        logger.error('cron:verify-outcomes', `Verification failed for ${outcomeId}`, err)
         failed++
       }
     }
@@ -53,7 +56,7 @@ export async function GET(req: NextRequest) {
   try {
     await updatePlatformTotals()
   } catch (err) {
-    console.error('[verify-outcomes] platform totals update failed:', err)
+    logger.error('cron:verify-outcomes', 'Platform totals update failed', err)
   }
 
   return NextResponse.json({

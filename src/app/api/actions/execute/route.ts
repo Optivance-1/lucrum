@@ -9,6 +9,16 @@ import { getUserPlan, canUseActionExecution } from '@/lib/subscription'
 import { recordDataPoint } from '@/lib/benchmark-dataset'
 import type { OutcomeCategory, CFOContext, StripeMetrics } from '@/types'
 
+const stripeObjectIdFromResult = (r: Record<string, unknown>): string | null => {
+  if (typeof r.id === 'string') return r.id
+  const keys = ['invoiceId', 'payoutId', 'subscriptionId', 'couponId'] as const
+  for (const k of keys) {
+    const v = r[k]
+    if (typeof v === 'string') return v
+  }
+  return null
+}
+
 const DESTRUCTIVE_ACTIONS = new Set(['cancel_subscription', 'pause_subscription', 'trigger_payout', 'update_price'])
 
 type ExecuteBody = {
@@ -338,6 +348,21 @@ export async function POST(req: NextRequest) {
       }
 
       const outcomeRecord = await recordOutcome(userId, actionType, expectedImpact, category, stripeObjectId, stripeObjectType)
+
+      const stripeConnection = await getStripeConnection(userId)
+      if (stripeConnection) {
+        await safeKvSet(
+          `outcome_stripe_ref:${userId}`,
+          JSON.stringify({
+            accountId: stripeConnection.stripeAccountId,
+            actionType,
+            actionId: pendingEntry.id,
+            executedAt: Date.now(),
+            stripeObjectId: stripeObjectIdFromResult(result as Record<string, unknown>) ?? stripeObjectId ?? null,
+          }),
+          { ex: 60 * 60 * 24 * 45 },
+        )
+      }
 
       // Record anonymized data point for benchmark dataset (fire and forget)
       const metricsCache = await safeKvGet<StripeMetrics>(`metrics:${userId}`)
