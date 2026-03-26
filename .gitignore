@@ -34,3 +34,15 @@ pnpm-debug.log*
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Lead scraper output
+leads.json
+leads.csv
+instagram_leads.json
+instagram_leads.csv

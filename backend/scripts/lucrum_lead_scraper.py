@@ -488,6 +488,62 @@ def export_leads_csv(leads: List[Lead], path: str) -> None:
             writer.writerow(row)
 
 
+def _fetch_instagram_leads() -> List[Lead]:
+    """Fetch Instagram leads and convert to standard Lead format."""
+    try:
+        # Import here to avoid circular imports and allow script to run without Instagram module
+        import importlib.util
+        import os as _os
+
+        # Find the instagram_lead_finder module
+        script_dir = _os.path.dirname(_os.path.abspath(__file__))
+        instagram_module_path = _os.path.join(script_dir, "instagram_lead_finder.py")
+
+        if not _os.path.exists(instagram_module_path):
+            print("[lucrum-leads] Instagram module not found, skipping...", file=sys.stderr)
+            return []
+
+        spec = importlib.util.spec_from_file_location("instagram_lead_finder", instagram_module_path)
+        if not spec or not spec.loader:
+            return []
+
+        ig_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ig_module)
+
+        # Run Instagram scraper
+        ig_leads = ig_module.fetch_indiehackers_instagram_links()
+        for tag in ["saasfounder", "indiehacker"]:
+            ig_leads.extend(ig_module.search_hashtag_hashtagpage(tag))
+
+        # Convert InstagramLead to Lead
+        converted: List[Lead] = []
+        for ig in ig_leads:
+            if ig is None:
+                continue
+            raw_dict = {}
+            if hasattr(ig, '__dataclass_fields__'):
+                raw_dict = dataclasses.asdict(ig)
+            lead = Lead(
+                source=getattr(ig, 'source', 'instagram'),
+                product_name=getattr(ig, 'full_name', None),
+                twitter_handle=getattr(ig, 'instagram_handle', None),  # Store Instagram handle in twitter_handle field
+                website=getattr(ig, 'website', None) or getattr(ig, 'external_url', None),
+                email=getattr(ig, 'email', None),
+                mrr_text=None,
+                username=getattr(ig, 'username', None),
+                follower_count=getattr(ig, 'follower_count', None),
+                score=getattr(ig, 'score', 1),
+                priority=getattr(ig, 'priority', False),
+                raw={"instagram": raw_dict}
+            )
+            converted.append(lead)
+
+        return converted
+    except Exception as e:
+        print(f"[lucrum-leads] Instagram fetch failed: {e}", file=sys.stderr)
+        return []
+
+
 def main() -> int:
     all_leads: List[Lead] = []
 
@@ -502,6 +558,9 @@ def main() -> int:
 
     print("[lucrum-leads] Fetching ProductHunt leads...", file=sys.stderr)
     all_leads.extend(fetch_producthunt_leads())
+
+    print("[lucrum-leads] Fetching Instagram leads...", file=sys.stderr)
+    all_leads.extend(_fetch_instagram_leads())
 
     print(f"[lucrum-leads] Collected {len(all_leads)} raw leads.", file=sys.stderr)
     deduped = deduplicate_leads(all_leads)
