@@ -188,9 +188,19 @@ export async function GET(req: NextRequest) {
     const failedPaymentsValue = pastDue.reduce((sum: number, sub: any) => sum + subToMonthlyAmount(sub), 0)
     const failedPaymentsCount = pastDue.length
 
-    // ── Churn rate ───────────────────────────────────────────────────────────
-    const activeAtStart = allActiveSubs.data.length + cancelledSubs30d.data.length
-    const churnRate = calculateChurnRate(cancelledSubs30d.data.length, activeAtStart)
+ // ── Churn rate (cohort-based, not naive) ─────────────────────────────────
+ // Calculate cohort churn: of customers who signed up 30+ days ago, what % cancelled?
+ const thirtyDaysAgo = d30
+ // Customers at risk = all customers who existed 30 days ago
+ const customersAtRisk30dAgo = allCustomers.data.filter(
+ (c: any) => c.created < thirtyDaysAgo
+ ).length
+ // Actual churn in last 30 days
+ const actualChurn30d = cancelledSubs30d.data.length
+ // Cohort-based churn rate
+ const churnRate = customersAtRisk30dAgo > 0
+ ? (actualChurn30d / customersAtRisk30dAgo) * 100
+ : 0
 
     // ── Cash & runway ────────────────────────────────────────────────────────
     const availableBalance = balance.available.reduce((sum, b) => sum + b.amount, 0) / 100
@@ -219,20 +229,12 @@ export async function GET(req: NextRequest) {
       return { date, label, revenue: Math.round(dailyMap[date]) }
     })
 
-    // ── MRR history (build from current + derive backwards — Phase 1 approx) ─
-    // For Phase 1 we build a 6-month synthetic history based on growth rate
-    // Phase 2 will store snapshots in DB
-    const growthFactor = mrrGrowth / 100
-    const mrrHistory = Array.from({ length: 7 }, (_, i) => {
-      const monthsBack = 6 - i
-      const historicalMrr = mrr / Math.pow(1 + growthFactor, monthsBack)
-      const d = new Date()
-      d.setMonth(d.getMonth() - monthsBack)
-      return {
-        month: d.toLocaleDateString('en-US', { month: 'short' }),
-        mrr: Math.round(Math.max(0, historicalMrr)),
-      }
-    })
+ // ── MRR history from actual stored snapshots (no more fake extrapolation) ─
+ // Get real historical data, save current snapshot for future reads
+ const { getMRRHistory, saveMRRSnapshot } = await import('@/lib/mrr-history')
+ const mrrHistory = await getMRRHistory(userId, 6)
+ // Save current MRR as this month's snapshot
+ await saveMRRSnapshot(userId, mrr)
 
     // ── Recent events feed ───────────────────────────────────────────────────
     const recentEvents: StripeEvent[] = charges30d.data.slice(0, 15).map(charge => {
@@ -385,12 +387,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    await Promise.all([
+ // Use allSettled so one failure doesn't crash the entire request
+ const saveResults = await Promise.allSettled([
       saveSnapshot(userId, metrics),
       rememberStripeAccountOwner(account.id, userId),
       ...allCustomers.data
         .filter((customer: any) => typeof customer.id === 'string')
-        .map((customer: any) => rememberStripeCustomerOwner(customer.id, userId)),
+        .slice(0, 1000) // Cap to prevent timeout
+ .map((customer: any) => rememberStripeCustomerOwner(customer.id, userId)),
       ...Array.from(
         new Set(
           [
@@ -404,6 +408,13 @@ export async function GET(req: NextRequest) {
         )
       ).map((subscriptionId: string) => rememberStripeSubscriptionOwner(subscriptionId, userId)),
     ])
+ 
+ // Log any failures but don't crash
+ saveResults.forEach((result, i) => {
+ if (result.status === 'rejected') {
+ console.error('[stripe/data] Save operation', i, 'failed:', result.reason)
+ }
+ })
 
     return NextResponse.json(metrics, {
       headers: {

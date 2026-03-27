@@ -1,6 +1,7 @@
 import type Stripe from 'stripe'
 import type { StripeMetrics, StripeCustomer, RevenueLeak, LeakCategory } from '@/types'
 import { safeKvGet, safeKvSet } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 
 export async function detectLeaks(
   metrics: StripeMetrics,
@@ -85,7 +86,7 @@ async function detectFailedPayments(
       autoFixDescription: 'Automatically retry all failed payments',
     }]
   } catch (err) {
-    console.error('[leak-detector] failed payments detection error:', err)
+    logger.error('leak-detector', 'failed payments detection error', { error: err })
     return []
   }
 }
@@ -153,7 +154,7 @@ async function detectExpiringCards(
       autoFixDescription: 'Send card update reminder emails',
     }]
   } catch (err) {
-    console.error('[leak-detector] expiring cards detection error:', err)
+    logger.error('leak-detector', 'expiring cards detection error', { error: err })
     return []
   }
 }
@@ -199,7 +200,7 @@ async function detectDunningRisk(
       autoFixDescription: 'Send recovery offer with temporary discount',
     }]
   } catch (err) {
-    console.error('[leak-detector] dunning risk detection error:', err)
+    logger.error('leak-detector', 'dunning risk detection error', { error: err })
     return []
   }
 }
@@ -246,7 +247,7 @@ async function detectPausedSubscriptions(
       autoFixDescription: 'Send reactivation campaign',
     }]
   } catch (err) {
-    console.error('[leak-detector] paused subscriptions detection error:', err)
+    logger.error('leak-detector', 'paused subscriptions detection error', { error: err })
     return []
   }
 }

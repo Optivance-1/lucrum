@@ -13,9 +13,42 @@ export interface StripeConnection {
   businessName?: string
 }
 
+let encryptionKeyValidated = false
+let encryptionKeyError: string | null = null
+
 function getEncryptionKey(): Buffer {
-  const raw = process.env.COOKIE_ENCRYPTION_KEY || process.env.LUCRUM_STRIPE_SECRET_KEY || ''
+  const raw = process.env.COOKIE_ENCRYPTION_KEY
+
+  if (!raw) {
+    const msg = 'COOKIE_ENCRYPTION_KEY environment variable is required. Generate a 32+ character random string and set it in your environment.'
+    if (!encryptionKeyValidated && !encryptionKeyError) {
+      encryptionKeyError = msg
+      console.error('[stripe-connection] FATAL:', msg)
+    }
+    throw new Error(msg)
+  }
+
+  if (raw.length < 32) {
+    const msg = `COOKIE_ENCRYPTION_KEY must be at least 32 characters (got ${raw.length})`
+    if (!encryptionKeyValidated && !encryptionKeyError) {
+      encryptionKeyError = msg
+      console.error('[stripe-connection] FATAL:', msg)
+    }
+    throw new Error(msg)
+  }
+
+  encryptionKeyValidated = true
   return crypto.createHash('sha256').update(raw).digest()
+}
+
+// Check encryption status at startup
+export function isEncryptionReady(): { ready: boolean; error: string | null } {
+  try {
+    getEncryptionKey()
+    return { ready: true, error: null }
+  } catch (e) {
+    return { ready: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export function encryptToken(token: string): string {

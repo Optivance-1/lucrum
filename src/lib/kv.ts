@@ -67,3 +67,6 @@ export async function safeKvDel(...keys: string[]): Promise<number> {
     return 0
   }
 }
+
+// Export the client getter for atomic operations (incr, expire, etc.)
+export { getKvClient }
